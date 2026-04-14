@@ -1,0 +1,281 @@
+{% extends "base.html" %}
+{% block title %}Rigorous Evaluation — Medical Data Analysis{% endblock %}
+{% block content %}
+
+<h1>Rigorous Synthetic Data Evaluation</h1>
+<p class="subtitle">Addressing methodological concerns with proper data splits and honest assessment.</p>
+
+<!-- Data Leakage Alert -->
+<div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 1rem; margin: 1rem 0;">
+    <h3 style="color: #856404; margin-top: 0;">Data Leakage Detection</h3>
+    <p><strong>Problem Identified:</strong> {{ results.data_leakage_explanation.what_happened }}</p>
+    <p><strong>Why This Matters:</strong> {{ results.data_leakage_explanation.why_problematic }}</p>
+    <p><strong>Evidence:</strong> {{ results.data_leakage_explanation.evidence }}</p>
+</div>
+
+<!-- Methodology Comparison -->
+<div class="card">
+    <h2>Methodology Comparison</h2>
+    
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin: 1.5rem 0;">
+        
+        <!-- Naive Approach -->
+        <div style="border: 2px solid #e74c3c; border-radius: 8px; padding: 1.5rem;">
+            <h3 style="color: #e74c3c; margin-top: 0;">Naive Approach (Original)</h3>
+            
+            <div class="insight">
+                <strong>Data Usage:</strong><br>
+                {{ results.methodology_comparison.naive_approach.data_usage|default("Uses all 52 samples for synthetic generation") }}
+            </div>
+            
+            <div class="insight">
+                <strong>Evaluation:</strong><br>
+                {{ results.methodology_comparison.naive_approach.evaluation|default("Tests on same 52 samples used for generation") }}
+            </div>
+            
+            <div class="insight">
+                <strong>Issues:</strong>
+                <ul>
+                    {% for issue in results.methodology_comparison.naive_approach.issues|default([]) %}
+                    <li>{{ issue }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            
+            <div style="background: #fdf2f2; padding: 1rem; border-radius: 4px; margin-top: 1rem;">
+                <strong>Reported Accuracy:</strong> {{ results.methodology_comparison.naive_approach.reported_accuracy|default("63.5%") }}<br>
+                <strong style="color: #c0392b;">Reality:</strong> {{ results.methodology_comparison.naive_approach.honest_assessment|default("Artificially inflated by data leakage") }}
+            </div>
+        </div>
+        
+        <!-- Rigorous Approach -->
+        <div style="border: 2px solid #27ae60; border-radius: 8px; padding: 1.5rem;">
+            <h3 style="color: #27ae60; margin-top: 0;">Rigorous Approach (Improved)</h3>
+            
+            <div class="insight">
+                <strong>Data Usage:</strong><br>
+                {{ results.methodology_comparison.rigorous_approach.data_usage|default("Uses only 31 samples (60%) for synthetic generation") }}
+            </div>
+            
+            <div class="insight">
+                <strong>Evaluation:</strong><br>
+                {{ results.methodology_comparison.rigorous_approach.evaluation|default("Tests on held-out 10 samples (20%)") }}
+            </div>
+            
+            <div class="insight">
+                <strong>Benefits:</strong>
+                <ul>
+                    {% for benefit in results.methodology_comparison.rigorous_approach.benefits|default([]) %}
+                    <li>{{ benefit }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            
+            <div style="background: #f0f9f0; padding: 1rem; border-radius: 4px; margin-top: 1rem;">
+                <strong>Expected Accuracy:</strong> {{ results.methodology_comparison.rigorous_approach.expected_accuracy|default("45-55%") }}<br>
+                <strong style="color: #27ae60;">Assessment:</strong> {{ results.methodology_comparison.rigorous_approach.honest_assessment|default("More realistic but highly uncertain") }}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Performance Comparison -->
+<div class="card">
+    <h2>Honest Performance Assessment</h2>
+    
+    <table style="width: 100%; border-collapse: collapse; margin: 1rem 0;">
+        <thead>
+            <tr style="background: #2c3e50; color: white;">
+                <th style="padding: 0.8rem; text-align: left;">Approach</th>
+                <th style="padding: 0.8rem; text-align: center;">Accuracy</th>
+                <th style="padding: 0.8rem; text-align: center;">Range</th>
+                <th style="padding: 0.8rem; text-align: center;">Overfitting</th>  
+                <th style="padding: 0.8rem; text-align: center;">Stability</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if results.performance_comparison and results.performance_comparison.approaches %}
+                {% for approach in results.performance_comparison.approaches %}
+                <tr style="{% if loop.index is odd %}background: #f9f9f9;{% endif %}">
+                    <td style="padding: 0.8rem;">{{ approach.name|default("Unknown") }}</td>
+                    <td style="padding: 0.8rem; text-align: center;">{{ "%.1f%"|format((approach.accuracy|default(0)) * 100) }}</td>
+                    <td style="padding: 0.8rem; text-align: center;">{{ approach.accuracy_range|default("Unknown") }}</td>
+                    <td style="padding: 0.8rem; text-align: center;">{{ approach.overfitting|default("Unknown") }}</td>
+                    <td style="padding: 0.8rem; text-align: center;">{{ approach.stability|default("Unknown") }}</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="5" style="padding: 1rem; text-align: center; font-style: italic;">Performance data not available</td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+    
+    <div class="insight">
+        <strong>Key Observation:</strong> Synthetic data provides modest improvements in stability and 
+        slight accuracy gains, but all approaches perform near baseline levels. The fundamental 
+        limitation is insufficient training data, not methodology.
+    </div>
+</div>
+
+<!-- Limitations -->
+<div class="card">
+    <h2>Honest Limitations Assessment</h2>
+    
+    <div style="background: #fef9e7; border-left: 4px solid #f39c12; padding: 1.5rem; margin: 1rem 0;">
+        <h3 style="color: #e67e22; margin-top: 0;">Fundamental Dataset Limitations</h3>
+        <ul>
+            {% if results.limitations %}
+                {% for limitation in results.limitations %}
+                <li>{{ limitation }}</li>
+                {% endfor %}
+            {% else %}
+                <li>Small dataset size limits reliable evaluation</li>
+                <li>Missing comprehensive medical features</li>
+                <li>No external validation performed</li>
+            {% endif %}
+        </ul>
+    </div>
+</div>
+
+<!-- Clinical Assessment -->
+<div class="card">
+    <h2>Clinical Reality Check</h2>
+    
+    <div style="background: #f8d7da; border: 1px solid #f5c6cb; padding: 1.5rem; margin: 1rem 0; border-radius: 4px;">
+        <h3 style="color: #721c24; margin-top: 0;">{{ results.clinical_assessment.deployment_readiness|default("NOT SUITABLE FOR CLINICAL USE") }}</h3>
+        
+        {% if results.clinical_assessment and results.clinical_assessment.current_naive_problems %}
+            <div>
+                <strong>Current Problems:</strong>
+                <ul>
+                    {% for problem in results.clinical_assessment.current_naive_problems %}
+                    <li>{{ problem }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+        
+        {% if results.clinical_assessment and results.clinical_assessment.required_improvements %}
+            <div>
+                <strong>Required for Clinical Use:</strong>
+                <ul>
+                    {% for improvement in results.clinical_assessment.required_improvements %}
+                    <li>{{ improvement }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Academic Value -->
+<div class="card">
+    <h2>Academic and Learning Value</h2>
+    
+    <div style="background: #d1ecf1; border: 1px solid #bee5eb; padding: 1.5rem; margin: 1rem 0; border-radius: 4px;">
+        <h3 style="color: #0c5460; margin-top: 0;">Educational Objectives Met</h3>
+        
+        {% if results.academic_value and results.academic_value.demonstrates %}
+            <div>
+                <strong>This Project Demonstrates:</strong>
+                <ul>
+                    {% for demo in results.academic_value.demonstrates %}
+                    <li>{{ demo }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+        
+        {% if results.academic_value and results.academic_value.learning_outcomes %}
+            <div>
+                <strong>Learning Outcomes Achieved:</strong>
+                <ul>
+                    {% for outcome in results.academic_value.learning_outcomes %}
+                    <li>{{ outcome }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="navigation">
+    <a href="{{ url_for('performance') }}" class="btn">View Original Results</a>
+    <a href="{{ url_for('methodology_comparison') }}" class="btn">Detailed Comparison</a>
+    <a href="{{ url_for('index') }}" class="btn">Back to Dashboard</a>
+</div>
+
+{% endblock %}
+
+<!-- Clinical Assessment -->
+<div class="card">
+    <h2>Clinical Deployment Assessment</h2>
+    
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+        <div>
+            <h3>Current Status</h3>
+            <div style="background: #fdf2f2; border: 2px solid #e74c3c; padding: 1.5rem; border-radius: 8px;">
+                <div style="font-size: 1.2rem; font-weight: bold; color: #c0392b; margin-bottom: 1rem;">
+                    {{ results.clinical_assessment.deployment_readiness }}
+                </div>
+                <div style="color: #922b21;">
+                    {{ results.clinical_assessment.current_utility }}
+                </div>
+            </div>
+        </div>
+        
+        <div>
+            <h3>Requirements for Clinical Use</h3>
+            <ul>
+                {% for requirement in results.clinical_assessment.required_improvements %}
+                <li>{{ requirement }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- Academic Value -->
+<div class="card">
+    <h2>Educational & Academic Value</h2>
+    
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+        <div>
+            <h3>Demonstrates</h3>
+            <ul>
+                {% for demo in results.academic_value.demonstrates %}
+                <li>{{ demo }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        
+        <div>
+            <h3>Learning Outcomes</h3>
+            <ul>
+                {% for outcome in results.academic_value.learning_outcomes %}
+                <li>{{ outcome }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+    
+    <div class="insight" style="margin-top: 2rem;">
+        <strong>Project Value:</strong> While the model is not clinically viable, this work successfully 
+        demonstrates synthetic data techniques, proper ML evaluation methodology, and critical assessment 
+        of limitations. These are valuable skills for advanced ML work and research.
+    </div>
+</div>
+
+<!-- Navigation -->
+<div style="text-align: center; margin: 2rem 0;">
+    <a href="/performance" class="btn" style="background: #3498db; color: white; padding: 0.7rem 1.5rem; text-decoration: none; border-radius: 4px; margin: 0 0.5rem;">
+        View Original Results
+    </a>
+    <a href="/methodology_comparison" class="btn" style="background: #9b59b6; color: white; padding: 0.7rem 1.5rem; text-decoration: none; border-radius: 4px; margin: 0 0.5rem;">
+        Methodology Details
+    </a>
+</div>
+
+{% endblock %}

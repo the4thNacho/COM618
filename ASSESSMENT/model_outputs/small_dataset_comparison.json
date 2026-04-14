@@ -1,0 +1,92 @@
+{
+  "KNN (k=3)": {
+    "loo_accuracy": 59.61538461538461,
+    "cv5_accuracy": 53.63636363636364,
+    "assessment": "\ud83d\udd34 Poor",
+    "model_type": "small_data"
+  },
+  "KNN (k=5)": {
+    "loo_accuracy": 46.15384615384615,
+    "cv5_accuracy": 53.63636363636364,
+    "assessment": "\u274c Very Poor",
+    "model_type": "small_data"
+  },
+  "KNN (k=7)": {
+    "loo_accuracy": 46.15384615384615,
+    "cv5_accuracy": 53.63636363636364,
+    "assessment": "\u274c Very Poor",
+    "model_type": "small_data"
+  },
+  "Linear SVM (C=0.01)": {
+    "loo_accuracy": 51.92307692307693,
+    "cv5_accuracy": 51.81818181818182,
+    "assessment": "\u274c Very Poor",
+    "model_type": "small_data"
+  },
+  "Linear SVM (C=0.1)": {
+    "loo_accuracy": 21.153846153846153,
+    "cv5_accuracy": 42.00000000000001,
+    "assessment": "\u274c Very Poor",
+    "model_type": "small_data"
+  },
+  "Linear SVM (C=1.0)": {
+    "loo_accuracy": 32.69230769230769,
+    "cv5_accuracy": 44.18181818181818,
+    "assessment": "\u274c Very Poor",
+    "model_type": "small_data"
+  },
+  "Lasso Logistic (C=0.01)": {
+    "loo_accuracy": 51.92307692307693,
+    "cv5_accuracy": 51.81818181818182,
+    "assessment": "\u274c Very Poor",
+    "model_type": "small_data"
+  },
+  "Lasso Logistic (C=0.1)": {
+    "loo_accuracy": 51.92307692307693,
+    "cv5_accuracy": 51.81818181818182,
+    "assessment": "\u274c Very Poor",
+    "model_type": "small_data"
+  },
+  "Ridge Logistic (C=0.1)": {
+    "loo_accuracy": 26.923076923076923,
+    "cv5_accuracy": 48.0,
+    "assessment": "\u274c Very Poor",
+    "model_type": "small_data"
+  },
+  "Decision Tree (depth=2)": {
+    "loo_accuracy": 32.69230769230769,
+    "cv5_accuracy": 42.54545454545455,
+    "assessment": "\u274c Very Poor",
+    "model_type": "small_data"
+  },
+  "Decision Tree (depth=3)": {
+    "loo_accuracy": 28.846153846153843,
+    "cv5_accuracy": 44.18181818181818,
+    "assessment": "\u274c Very Poor",
+    "model_type": "small_data"
+  },
+  "Logistic + Feature Selection": {
+    "loo_accuracy": 32.69230769230769,
+    "cv5_accuracy": 50.0,
+    "assessment": "\u274c Very Poor",
+    "model_type": "small_data"
+  },
+  "SVM (RBF) - Original": {
+    "loo_accuracy": 32.69230769230769,
+    "cv5_accuracy": 44.18181818181818,
+    "assessment": "\u274c Very Poor",
+    "model_type": "original"
+  },
+  "Random Forest - Original": {
+    "loo_accuracy": 44.230769230769226,
+    "cv5_accuracy": 57.454545454545446,
+    "assessment": "\u274c Very Poor",
+    "model_type": "original"
+  },
+  "Naive Bayes - Original": {
+    "loo_accuracy": 30.76923076923077,
+    "cv5_accuracy": 46.0,
+    "assessment": "\u274c Very Poor",
+    "model_type": "original"
+  }
+}

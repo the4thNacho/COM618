@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Data Cleaning — Medical Data Analysis{% endblock %}
+{% block content %}
+
+<h1>Data Cleaning &amp; Quality Assessment</h1>
+<p class="subtitle">Comparison of the raw dirty dataset against the cleaned version using imputation strategies tailored to each column type.</p>
+
+<div class="card">
+    <h2>Cleaning Strategy Summary</h2>
+    <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+        <thead>
+            <tr style="background:#2c3e50; color:#fff;">
+                <th style="padding:0.6rem 1rem; text-align:left;">Column</th>
+                <th style="padding:0.6rem 1rem; text-align:left;">Type</th>
+                <th style="padding:0.6rem 1rem; text-align:left;">Strategy</th>
+                <th style="padding:0.6rem 1rem; text-align:left;">Justification</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in strategy_table %}
+            <tr style="{% if loop.index is odd %}background:#f9f9f9;{% endif %}">
+                <td style="padding:0.5rem 1rem; font-weight:600;">{{ row.col }}</td>
+                <td style="padding:0.5rem 1rem;"><span class="badge badge-blue">{{ row.type }}</span></td>
+                <td style="padding:0.5rem 1rem;"><span class="badge badge-green">{{ row.strategy }}</span></td>
+                <td style="padding:0.5rem 1rem; color:#555;">{{ row.justification }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>Missing Data Comparison</h2>
+    <img src="/image/missing_data_comparison.png" class="img-full" alt="Missing Data Comparison">
+    <div class="insight">After cleaning, all missing values were resolved. The bar charts confirm zero missing values across every column in the cleaned dataset.</div>
+</div>
+
+<div class="card">
+    <h2>Missing Data Percentage by Column</h2>
+    <img src="/image/missing_percentage_comparison.png" class="img-full" alt="Missing Percentage Comparison">
+</div>
+
+<div class="card">
+    <h2>Numerical Feature Distributions (Before &amp; After)</h2>
+    <img src="/image/numerical_distributions.png" class="img-full" alt="Numerical Distributions">
+    <div class="insight">Mean/median imputation slightly inflates the central bin of each histogram (visible as a taller spike at the imputed value), which is the expected trade-off — the overall distribution shape is preserved.</div>
+</div>
+
+<div class="card">
+    <h2>Box Plot Comparison</h2>
+    <img src="/image/boxplot_comparison.png" class="img-full" alt="Box Plot Comparison">
+</div>
+
+<div class="card">
+    <h2>Categorical Distributions (Before &amp; After)</h2>
+    <img src="/image/categorical_distributions.png" class="img-full" alt="Categorical Distributions">
+    <div class="insight">Mode imputation for Gender and Smoker preserves the existing class balance. UNKNOWN replaces missing Diagnosis values rather than assuming a specific condition.</div>
+</div>
+
+<div class="card">
+    <h2>Summary Dashboard</h2>
+    <img src="/image/summary_dashboard.png" class="img-full" alt="Summary Dashboard">
+</div>
+
+{% endblock %}

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Home — Medical Data Analysis{% endblock %}
+{% block content %}
+
+<h1>Medical Data Analysis Pipeline</h1>
+<p class="subtitle">COM618 Assessment &mdash; Data preparation, exploration, and predictive modelling on a real-world medical dataset.</p>
+
+<div class="stat-row">
+    <div class="stat-box">
+        <div class="val">{{ stats.total_rows }}</div>
+        <div class="lbl">Total Patients</div>
+    </div>
+    <div class="stat-box">
+        <div class="val">{{ stats.features }}</div>
+        <div class="lbl">Features</div>
+    </div>
+    <div class="stat-box">
+        <div class="val">{{ stats.diabetes }}</div>
+        <div class="lbl">Diabetes Cases</div>
+    </div>
+    <div class="stat-box">
+        <div class="val">{{ stats.heart }}</div>
+        <div class="lbl">Heart Disease Cases</div>
+    </div>
+    <div class="stat-box">
+        <div class="val">{{ stats.unknown }}</div>
+        <div class="lbl">Undiagnosed</div>
+    </div>
+</div>
+
+<div class="img-grid">
+    <div class="card">
+        <h2>Pipeline Stages</h2>
+        <p>This application walks through the full data science pipeline:</p>
+        <ul style="margin-top:0.8rem; padding-left:1.2rem; line-height:2">
+            <li><strong>Data Cleaning</strong> — Imputation, deduplication, standardisation of the raw dirty CSV.</li>
+            <li><strong>Data Exploration</strong> — Pattern discovery with Matplotlib &amp; Seaborn charts.</li>
+            <li><strong>Predictive Model</strong> — Random Forest classifier for DIABETES / HEART DISEASE.</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>Dataset Overview</h2>
+        <p style="margin-bottom:0.6rem">Columns: <span class="badge badge-blue">Patient_ID</span>
+            <span class="badge badge-blue">Age</span>
+            <span class="badge badge-blue">Gender</span>
+            <span class="badge badge-blue">Blood_Pressure</span>
+            <span class="badge badge-blue">Cholesterol</span>
+            <span class="badge badge-blue">BMI</span>
+            <span class="badge badge-blue">Smoker</span>
+            <span class="badge badge-red">Diagnosis</span>
+            <span class="badge badge-grey">Admission_Date</span>
+            <span class="badge badge-grey">Notes</span>
+        </p>
+        <div class="insight">
+            The raw dataset contained missing values, inconsistent casing, and Y/N vs YES/NO mismatches.
+            These were resolved in the Data Cleaning stage using median, mean, and mode imputation
+            strategies appropriate for each feature type.
+        </div>
+    </div>
+</div>
+
+{% endblock %}

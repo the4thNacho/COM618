@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Prediction Model — Medical Data Analysis{% endblock %}
+{% block content %}
+
+<h1>Predictive Model — Diagnosis Classifier</h1>
+<p class="subtitle">Random Forest classifier trained to predict DIABETES vs HEART DISEASE from clinical features.</p>
+
+<div class="stat-row">
+    <div class="stat-box">
+        <div class="val">{{ metrics.accuracy }}%</div>
+        <div class="lbl">Test Accuracy</div>
+    </div>
+    <div class="stat-box">
+        <div class="val">{{ metrics.cv_mean }}%</div>
+        <div class="lbl">CV Mean (5-fold)</div>
+    </div>
+    <div class="stat-box">
+        <div class="val">±{{ metrics.cv_std }}%</div>
+        <div class="lbl">CV Std Dev</div>
+    </div>
+    <div class="stat-box">
+        <div class="val">52</div>
+        <div class="lbl">Training Samples</div>
+    </div>
+</div>
+
+<div class="img-grid">
+    <div class="card">
+        <h2>Confusion Matrix</h2>
+        <img src="/image/confusion_matrix.png" class="img-full" alt="Confusion Matrix">
+        <div class="insight">
+            The confusion matrix shows how well the model distinguishes between DIABETES and HEART DISEASE
+            on the held-out test set (25% of labelled data).
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Feature Importances</h2>
+        <img src="/image/feature_importance.png" class="img-full" alt="Feature Importances">
+        <div class="insight">
+            Cholesterol and Blood Pressure are the most informative features for distinguishing the two
+            diagnoses, which is clinically intuitive.
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Prediction Form</h2>
+    <p style="color:#555; margin-bottom:1rem; font-size:0.9rem;">
+        Enter patient clinical values below to receive a diagnosis prediction with class probabilities.
+    </p>
+    <form method="POST" action="/model">
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="age">Age (years)</label>
+                <input type="number" id="age" name="age" min="18" max="100"
+                       value="{{ form.age or 50 }}" required>
+            </div>
+            <div class="form-group">
+                <label for="bp">Blood Pressure (mmHg)</label>
+                <input type="number" id="bp" name="bp" min="60" max="220"
+                       value="{{ form.bp or 130 }}" required>
+            </div>
+            <div class="form-group">
+                <label for="chol">Cholesterol (mg/dL)</label>
+                <input type="number" id="chol" name="chol" min="100" max="400"
+                       value="{{ form.chol or 220 }}" required>
+            </div>
+            <div class="form-group">
+                <label for="bmi">BMI</label>
+                <input type="number" id="bmi" name="bmi" min="10" max="60" step="0.1"
+                       value="{{ form.bmi or 27.0 }}" required>
+            </div>
+            <div class="form-group">
+                <label for="smoker">Smoker</label>
+                <select id="smoker" name="smoker">
+                    <option value="NO" {% if form.smoker == 'NO' %}selected{% endif %}>No</option>
+                    <option value="YES" {% if form.smoker == 'YES' %}selected{% endif %}>Yes</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="gender">Gender</label>
+                <select id="gender" name="gender">
+                    <option value="MALE" {% if form.gender == 'MALE' %}selected{% endif %}>Male</option>
+                    <option value="FEMALE" {% if form.gender == 'FEMALE' %}selected{% endif %}>Female</option>
+                </select>
+            </div>
+        </div>
+        <button type="submit" class="btn">Predict Diagnosis</button>
+    </form>
+
+    {% if result %}
+    <div class="result-box">
+        <h3>Predicted Diagnosis:
+            <span class="badge {% if result.diagnosis == 'DIABETES' %}badge-blue{% else %}badge-red{% endif %}" style="font-size:1rem;">
+                {{ result.diagnosis }}
+            </span>
+        </h3>
+        <p style="color:#555; font-size:0.88rem; margin: 0.5rem 0 1rem;">Class probabilities:</p>
+        {% for cls, prob in result.probabilities.items() %}
+        <div class="prob-bar-wrap">
+            <div class="prob-label">{{ cls }}: {{ prob }}%</div>
+            <div class="prob-bar-bg">
+                <div class="prob-bar-fill {% if cls == 'DIABETES' %}diabetes{% else %}heart{% endif %}"
+                     style="width: {{ prob }}%;"></div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Classification Report</h2>
+    <pre style="background:#f9f9f9; padding:1rem; border-radius:5px; font-size:0.85rem; overflow-x:auto;">{{ metrics.report }}</pre>
+    <div class="insight">
+        <strong>Note on performance:</strong> With only 52 labelled samples (split 75/25),
+        the test set contains just 13 records. Accuracy on such a small test set is highly sensitive to
+        individual predictions. The 5-fold cross-validation score ({{ metrics.cv_mean }}%) is a more
+        reliable estimate of generalisation performance.
+    </div>
+</div>
+
+{% endblock %}

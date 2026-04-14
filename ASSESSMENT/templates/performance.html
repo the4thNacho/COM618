@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}Model Performance — Medical Data Analysis{% endblock %}
+{% block content %}
+
+<h1>Model Performance Dashboard</h1>
+<p class="subtitle">Accuracy, ROC-AUC, confidence, per-class metrics and overfitting analysis for the K-Nearest Neighbors classifier.</p>
+
+{% if stats.overfit_warning %}
+<div style="background:#fdf2f2; border:2px solid #c0392b; border-radius:8px; padding:1rem 1.4rem; margin-bottom:1.5rem;">
+    <strong style="color:#c0392b; font-size:1rem;">Overfitting Detected</strong>
+    <p style="margin:0.4rem 0 0; color:#922b21; font-size:0.9rem;">
+        Train accuracy ({{ stats.train_acc }}%) is <strong>{{ stats.overfitting_gap }}%</strong> higher than test accuracy ({{ stats.test_acc }}%).
+        This is caused by the very small labelled dataset (52 samples). GridSearchCV tuned the
+        hyperparameters but found the default settings already optimal for this data size.
+        The LOO CV ({{ stats.loo_acc }}%) and 5-fold CV ({{ stats.cv_acc_mean }}%) are more reliable estimates than the
+        single hold-out split. Collecting more labelled data is the primary fix.
+    </p>
+</div>
+{% endif %}
+
+<div class="stat-row">
+    <div class="stat-box">
+        <div class="val" style="color:#e74c3c;">{{ stats.test_acc }}%</div>
+        <div class="lbl">Test Accuracy</div>
+    </div>
+    <div class="stat-box">
+        <div class="val" style="color:#27ae60;">{{ stats.train_acc }}%</div>
+        <div class="lbl">Train Accuracy</div>
+    </div>
+    <div class="stat-box">
+        <div class="val" style="color:{% if stats.overfit_warning %}#c0392b{% else %}#27ae60{% endif %};">{{ stats.overfitting_gap }}%</div>
+        <div class="lbl">Overfitting Gap</div>
+    </div>
+    <div class="stat-box">
+        <div class="val" style="color:#2980b9;">{{ stats.roc_auc }}%</div>
+        <div class="lbl">ROC-AUC (split)</div>
+    </div>
+    <div class="stat-box">
+        <div class="val" style="color:#e67e22;">{{ stats.cv_roc_mean }}%</div>
+        <div class="lbl">CV ROC-AUC</div>
+    </div>
+    <div class="stat-box">
+        <div class="val" style="color:#27ae60;">{{ stats.loo_acc }}%</div>
+        <div class="lbl">LOO Accuracy</div>
+    </div>
+    <div class="stat-box">
+        <div class="val" style="color:#9b59b6;">{{ stats.mean_confidence }}%</div>
+        <div class="lbl">Mean Confidence</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Training Data Information</h2>
+    <div style="display:flex; gap:1rem; align-items:center; margin-bottom:1rem;">
+        <div class="stat-box">
+            <div class="val" style="color:{% if stats.training_mode == 'synthetic' %}#9b59b6{% else %}#2980b9{% endif %};">{{ stats.training_mode.replace('_', ' ').title() }}</div>
+            <div class="lbl">Training Mode</div>
+        </div>
+        <div class="stat-box">
+            <div class="val" style="color:#27ae60;">{{ stats.n_train }}</div>
+            <div class="lbl">Training Samples</div>
+        </div>
+        <div class="stat-box">
+            <div class="val" style="color:#e74c3c;">{{ stats.n_test }}</div>
+            <div class="lbl">Test Samples</div>
+        </div>
+    </div>
+    {% if stats.training_mode == 'synthetic' %}
+    <div class="insight">
+        <strong>Synthetic Data Training:</strong> Model was trained on {{ stats.n_train }} synthetic samples 
+        generated from the real data's statistical properties. All {{ stats.n_test }} real labelled samples 
+        were used as the held-out test set for honest evaluation. This approach provides more training data 
+        while preserving real-world performance assessment.
+    </div>
+    {% else %}
+    <div class="insight">
+        <strong>Real Data Only:</strong> Model used a traditional 75/25 split of the {{ stats.n_train + stats.n_test }} 
+        real labelled samples. No synthetic data was available for training augmentation.
+    </div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Full Performance Dashboard</h2>
+    <img src="/image/perf_summary_dashboard.png" class="img-full" alt="Performance Summary Dashboard">
+    <div class="insight">
+        <strong>Reading this dashboard:</strong> Top-left is the overfitting indicator.
+        ROC curve uses the 13-sample hold-out (noisy). Bottom row shows 5-fold CV scores —
+        the best generalisation estimate. Green = above random, red = below.
+    </div>
+</div>
+
+<div class="card">
+    <h2>GridSearchCV — Hyperparameter Tuning</h2>
+    <p style="color:#555; font-size:0.9rem; margin-bottom:1rem;">
+        GridSearchCV searched <strong>{{ 5 * 4 * 2 }}</strong> hyperparameter combinations
+        (5 max_depth × 4 min_samples_leaf × 2 n_estimators) using 5-fold CV scored on ROC-AUC.
+        Best model: <span class="badge badge-blue">{{ stats.best_model }}</span>
+    </p>
+    <table style="border-collapse:collapse; font-size:0.9rem;">
+        <thead>
+            <tr style="background:#2c3e50; color:#fff;">
+                <th style="padding:0.5rem 1.2rem; text-align:left;">Parameter</th>
+                <th style="padding:0.5rem 1.2rem; text-align:left;">Best Value</th>
+                <th style="padding:0.5rem 1.2rem; text-align:left;">What it controls</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for param, val in stats.best_params.items() %}
+            <tr style="{% if loop.index is odd %}background:#f9f9f9;{% endif %}">
+                <td style="padding:0.45rem 1.2rem; font-family:monospace;">{{ param }}</td>
+                <td style="padding:0.45rem 1.2rem;"><span class="badge badge-green">{{ val }}</span></td>
+                <td style="padding:0.45rem 1.2rem; color:#555;">
+                    {% if param == 'max_depth' %}Maximum depth of each tree (None = fully grown)
+                    {% elif param == 'min_samples_leaf' %}Minimum samples required at a leaf node
+                    {% elif param == 'n_estimators' %}Number of trees in the forest
+                    {% elif param == 'max_features' %}Features considered at each split
+                    {% else %}{{ param }}{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="insight" style="margin-top:1rem;">
+        GridSearchCV selected <strong>max_depth=None, min_samples_leaf=1</strong> — the default,
+        fully-grown settings. This means constraining tree depth did <em>not</em> improve CV ROC-AUC
+        on this dataset. With only 52 samples, each 5-fold training split contains ~41 records,
+        and the signal-to-noise ratio is too low for depth constraints to help.
+    </div>
+</div>
+
+<div class="card">
+    <h2>Model Comparison (5-Fold CV)</h2>
+    <img src="/image/perf_model_comparison.png" class="img-full" alt="Model Comparison">
+    <div class="insight">
+        <strong>Insight:</strong> The Random Forest (default / tuned) achieved the highest CV ROC-AUC ({{ stats.cv_roc_mean }}%).
+        Logistic Regression and Naive Bayes scored below the random baseline on ROC-AUC,
+        suggesting the decision boundary in this dataset is not well-captured by linear or
+        independence-assuming models. SVM was near-random. This confirms RF is the appropriate
+        choice — though all models suffer from the small labelled sample size.
+    </div>
+</div>
+
+<div class="card">
+    <h2>Leave-One-Out CV vs Other Estimates</h2>
+    <img src="/image/perf_loo_cv.png" class="img-full" alt="LOO CV Comparison">
+    <div class="insight">
+        <strong>LOO CV</strong> trains on 51 samples and tests on 1, repeated 52 times.
+        It uses the maximum possible training data, giving the least-biased estimate.
+        LOO accuracy = <strong>{{ stats.loo_acc }}%</strong>.
+        The divergence between the single hold-out split and the CV-based estimates
+        illustrates how unreliable a single 13-sample test set is for evaluating performance.
+    </div>
+</div>
+
+<div class="img-grid">
+    <div class="card">
+        <h2>Train vs Test Accuracy</h2>
+        <img src="/image/perf_train_test_acc.png" class="img-full" alt="Train vs Test Accuracy">
+        <div class="insight">
+            100% train accuracy vs low test accuracy is memorisation, not generalisation.
+            Even after GridSearchCV tuning, the default parameters were selected, confirming
+            the overfitting is data-volume-driven rather than parameter-driven.
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>ROC Curve</h2>
+        <img src="/image/perf_roc_curve.png" class="img-full" alt="ROC Curve">
+        <div class="insight">
+            The ROC curve plots TPR vs FPR. The dashed diagonal = random classifier (AUC=0.50).
+            CV mean AUC = {{ stats.cv_roc_mean }}% &gt; 50%, showing the model ranks positive cases
+            better than chance on average across folds.
+        </div>
+    </div>
+</div>
+
+<div class="img-grid">
+    <div class="card">
+        <h2>Per-Class Precision / Recall / F1</h2>
+        <img src="/image/perf_per_class_metrics.png" class="img-full" alt="Per-class Metrics">
+        <div class="insight">
+            Precision = correct positive predictions / all positive predictions.
+            Recall = correct positive predictions / all actual positives.
+            F1 = harmonic mean. A class with 0% recall was never predicted on the test set.
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Prediction Confidence Distribution</h2>
+        <img src="/image/perf_confidence_hist.png" class="img-full" alt="Confidence Histogram">
+        <div class="insight">
+            High confidence + low accuracy = a miscalibrated model.
+            Mean confidence = {{ stats.mean_confidence }}% while test accuracy = {{ stats.test_acc }}%
+            — the model is more confident than it is correct, a hallmark of overfitting.
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>5-Fold Cross-Validation Scores</h2>
+    <img src="/image/perf_cv_scores.png" class="img-full" alt="CV Scores">
+    <div class="insight">
+        CV accuracy mean = <strong>{{ stats.cv_acc_mean }}%</strong>,
+        CV ROC-AUC mean = <strong>{{ stats.cv_roc_mean }}%</strong> (both above the 50% random baseline).
+        High fold-to-fold variance reflects the small dataset — each fold only has ~10 test samples.
+    </div>
+</div>
+
+<div class="card">
+    <h2>Per-Class Metrics Table</h2>
+    <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+        <thead>
+            <tr style="background:#2c3e50; color:#fff;">
+                <th style="padding:0.6rem 1rem; text-align:left;">Class</th>
+                <th style="padding:0.6rem 1rem; text-align:center;">Precision</th>
+                <th style="padding:0.6rem 1rem; text-align:center;">Recall</th>
+                <th style="padding:0.6rem 1rem; text-align:center;">F1 Score</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for cls in stats.class_names %}
+            {% set m = stats.per_class[cls] %}
+            <tr style="{% if loop.index is odd %}background:#f9f9f9;{% endif %}">
+                <td style="padding:0.5rem 1rem; font-weight:600;">{{ cls }}</td>
+                <td style="padding:0.5rem 1rem; text-align:center;">
+                    <span class="badge {% if m.precision >= 50 %}badge-green{% else %}badge-red{% endif %}">{{ m.precision }}%</span>
+                </td>
+                <td style="padding:0.5rem 1rem; text-align:center;">
+                    <span class="badge {% if m.recall >= 50 %}badge-green{% else %}badge-red{% endif %}">{{ m.recall }}%</span>
+                </td>
+                <td style="padding:0.5rem 1rem; text-align:center;">
+                    <span class="badge {% if m.f1 >= 50 %}badge-green{% else %}badge-red{% endif %}">{{ m.f1 }}%</span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}

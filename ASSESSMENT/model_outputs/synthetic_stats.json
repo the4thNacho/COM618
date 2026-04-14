@@ -1,0 +1,67 @@
+{
+  "generation_params": {
+    "n_samples": 500,
+    "seed": 42,
+    "n_real_labelled": 52
+  },
+  "bounds_used": {
+    "Age": [
+      21.0,
+      69.0
+    ],
+    "Blood_Pressure": [
+      116.0,
+      164.0
+    ],
+    "Cholesterol": [
+      168.0,
+      312.0
+    ],
+    "BMI": [
+      20.74,
+      41.86
+    ]
+  },
+  "class_stats": {
+    "DIABETES": {
+      "n_real": 27,
+      "weight": 0.5192,
+      "num_mean": {
+        "Age": 49.074,
+        "Blood_Pressure": 138.243,
+        "Cholesterol": 227.037,
+        "BMI": 31.202
+      },
+      "cat_freqs": {
+        "Smoker": {
+          "NO": 0.5925925925925926,
+          "YES": 0.4074074074074074
+        },
+        "Gender": {
+          "MALE": 0.7037037037037037,
+          "FEMALE": 0.2962962962962963
+        }
+      }
+    },
+    "HEART DISEASE": {
+      "n_real": 25,
+      "weight": 0.4808,
+      "num_mean": {
+        "Age": 47.4,
+        "Blood_Pressure": 137.767,
+        "Cholesterol": 230.4,
+        "BMI": 32.749
+      },
+      "cat_freqs": {
+        "Smoker": {
+          "NO": 0.6,
+          "YES": 0.4
+        },
+        "Gender": {
+          "MALE": 0.6,
+          "FEMALE": 0.4
+        }
+      }
+    }
+  }
+}
