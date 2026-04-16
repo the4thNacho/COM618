@@ -1,63 +1,83 @@
 {% extends "base.html" %}
-{% block title %}Home — Medical Data Analysis{% endblock %}
+{% block title %}Home — Diabetes Readmission Analysis{% endblock %}
 {% block content %}
 
-<h1>Medical Data Analysis Pipeline</h1>
-<p class="subtitle">COM618 Assessment &mdash; Data preparation, exploration, and predictive modelling on a real-world medical dataset.</p>
+<h1>Diabetes Readmission Prediction Pipeline</h1>
+<p class="subtitle">COM618 Assessment &mdash; Full data science pipeline on the UCI Diabetes 130-US Hospitals dataset (1999–2008).</p>
 
 <div class="stat-row">
     <div class="stat-box">
-        <div class="val">{{ stats.total_rows }}</div>
-        <div class="lbl">Total Patients</div>
+        <div class="val">{{ "{:,}".format(stats.raw_rows | int) }}</div>
+        <div class="lbl">Raw Encounters</div>
+    </div>
+    <div class="stat-box">
+        <div class="val">{{ "{:,}".format(stats.cleaned_rows | int) }}</div>
+        <div class="lbl">Cleaned (1 per Patient)</div>
     </div>
     <div class="stat-box">
         <div class="val">{{ stats.features }}</div>
-        <div class="lbl">Features</div>
+        <div class="lbl">Model Features</div>
     </div>
     <div class="stat-box">
-        <div class="val">{{ stats.diabetes }}</div>
-        <div class="lbl">Diabetes Cases</div>
+        <div class="val">{{ "{:,}".format(stats.early_readmitted | int) }}</div>
+        <div class="lbl">Early Readmissions (&lt;30d)</div>
     </div>
     <div class="stat-box">
-        <div class="val">{{ stats.heart }}</div>
-        <div class="lbl">Heart Disease Cases</div>
-    </div>
-    <div class="stat-box">
-        <div class="val">{{ stats.unknown }}</div>
-        <div class="lbl">Undiagnosed</div>
+        <div class="val">{{ stats.readmission_rate }}%</div>
+        <div class="lbl">Early Readmission Rate</div>
     </div>
 </div>
 
 <div class="img-grid">
     <div class="card">
         <h2>Pipeline Stages</h2>
-        <p>This application walks through the full data science pipeline:</p>
-        <ul style="margin-top:0.8rem; padding-left:1.2rem; line-height:2">
-            <li><strong>Data Cleaning</strong> — Imputation, deduplication, standardisation of the raw dirty CSV.</li>
-            <li><strong>Data Exploration</strong> — Pattern discovery with Matplotlib &amp; Seaborn charts.</li>
-            <li><strong>Predictive Model</strong> — Random Forest classifier for DIABETES / HEART DISEASE.</li>
+        <ul style="margin-top:0.8rem; padding-left:1.2rem; line-height:2.2">
+            <li><strong>Data Cleaning</strong> — Replace '?' missing values, remove deceased patients, deduplicate by patient, drop high-missingness columns, encode features.</li>
+            <li><strong>Feature Engineering</strong> — Age range → numeric, ICD-9 codes → 9 disease categories, medication summary features, ordinal lab result encoding.</li>
+            <li><strong>Data Exploration</strong> — Readmission rates by age, diagnosis, race, insulin usage; correlation heatmap; time-in-hospital distributions.</li>
+            <li><strong>Predictive Model</strong> — Gradient Boosting Classifier with balanced sample weights targeting early readmission (&lt;30 days).</li>
         </ul>
     </div>
 
     <div class="card">
-        <h2>Dataset Overview</h2>
-        <p style="margin-bottom:0.6rem">Columns: <span class="badge badge-blue">Patient_ID</span>
-            <span class="badge badge-blue">Age</span>
-            <span class="badge badge-blue">Gender</span>
-            <span class="badge badge-blue">Blood_Pressure</span>
-            <span class="badge badge-blue">Cholesterol</span>
-            <span class="badge badge-blue">BMI</span>
-            <span class="badge badge-blue">Smoker</span>
-            <span class="badge badge-red">Diagnosis</span>
-            <span class="badge badge-grey">Admission_Date</span>
-            <span class="badge badge-grey">Notes</span>
-        </p>
+        <h2>Dataset: Diabetes 130-US Hospitals</h2>
+        <p style="margin-bottom:0.8rem">101,766 inpatient encounters from 130 US hospitals, 1999–2008.</p>
+        <div style="margin-bottom:0.6rem">
+            <strong>Key columns:</strong><br>
+            <span class="badge badge-grey">encounter_id</span>
+            <span class="badge badge-grey">patient_nbr</span>
+            <span class="badge badge-blue">age</span>
+            <span class="badge badge-blue">gender</span>
+            <span class="badge badge-blue">race</span>
+            <span class="badge badge-blue">time_in_hospital</span>
+            <span class="badge badge-blue">num_medications</span>
+            <span class="badge badge-blue">A1Cresult</span>
+            <span class="badge badge-blue">insulin</span>
+            <span class="badge badge-blue">diag_1/2/3</span>
+            <span class="badge badge-red">readmitted</span>
+        </div>
         <div class="insight">
-            The raw dataset contained missing values, inconsistent casing, and Y/N vs YES/NO mismatches.
-            These were resolved in the Data Cleaning stage using median, mean, and mode imputation
-            strategies appropriate for each feature type.
+            <strong>Target variable:</strong> <code>readmitted</code> has three values —
+            <em>NO</em>, <em>&gt;30</em>, and <em>&lt;30</em>.
+            We reformulate this as a <strong>binary problem</strong>: predicting whether a patient
+            will be readmitted within 30 days (<em>&lt;30</em> = 1), which is the clinically
+            significant outcome used by hospital readmission reduction programmes.
         </div>
     </div>
+</div>
+
+<div class="card">
+    <h2>Why Early Readmission?</h2>
+    <p>
+        In the US, hospitals are penalised under the <em>Hospital Readmissions Reduction Programme</em> (HRRP)
+        for excessive 30-day readmission rates. Identifying at-risk diabetic patients before discharge
+        enables targeted interventions (medication review, follow-up appointments, patient education)
+        that can prevent costly and potentially harmful early returns.
+    </p>
+    <p style="margin-top:0.8rem">
+        Early readmission (&lt;30 days) affects <strong>{{ stats.readmission_rate }}%</strong>
+        of diabetic encounters in this dataset — roughly 1 in 9 patients.
+    </p>
 </div>
 
 {% endblock %}

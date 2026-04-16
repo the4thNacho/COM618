@@ -1,25 +1,28 @@
 {% extends "base.html" %}
-{% block title %}Prediction Model — Medical Data Analysis{% endblock %}
+{% block title %}Prediction Model — Diabetes Readmission{% endblock %}
 {% block content %}
 
-<h1>Predictive Model — Diagnosis Classifier</h1>
-<p class="subtitle">Random Forest classifier trained to predict DIABETES vs HEART DISEASE from clinical features.</p>
+<h1>Predictive Model — Early Readmission Classifier</h1>
+<p class="subtitle">
+    Gradient Boosting Classifier predicting whether a diabetic patient will be readmitted
+    within 30 days of discharge.
+</p>
 
 <div class="stat-row">
     <div class="stat-box">
-        <div class="val">{{ metrics.accuracy }}%</div>
+        <div class="val">{{ (metrics.test_performance.accuracy * 100) | round(1) }}%</div>
         <div class="lbl">Test Accuracy</div>
     </div>
     <div class="stat-box">
-        <div class="val">{{ metrics.cv_mean }}%</div>
-        <div class="lbl">CV Mean (5-fold)</div>
+        <div class="val">{{ (metrics.test_performance.roc_auc * 100) | round(1) }}%</div>
+        <div class="lbl">ROC-AUC</div>
     </div>
     <div class="stat-box">
-        <div class="val">±{{ metrics.cv_std }}%</div>
-        <div class="lbl">CV Std Dev</div>
+        <div class="val">{{ (metrics.cross_validation.cv_roc_auc_mean * 100) | round(1) }}%</div>
+        <div class="lbl">CV ROC-AUC (5-fold)</div>
     </div>
     <div class="stat-box">
-        <div class="val">52</div>
+        <div class="val">{{ "{:,}".format(metrics.data_splits.training | int) }}</div>
         <div class="lbl">Training Samples</div>
     </div>
 </div>
@@ -29,95 +32,198 @@
         <h2>Confusion Matrix</h2>
         <img src="/image/confusion_matrix.png" class="img-full" alt="Confusion Matrix">
         <div class="insight">
-            The confusion matrix shows how well the model distinguishes between DIABETES and HEART DISEASE
-            on the held-out test set (25% of labelled data).
+            The confusion matrix shows true/false positive and negative predictions on the
+            held-out test set (20% of data). With balanced sample weights, the model is
+            tuned to identify <em>early readmissions</em> rather than just predicting the
+            majority class.
         </div>
     </div>
 
     <div class="card">
-        <h2>Feature Importances</h2>
+        <h2>Feature Importances (Top 15)</h2>
         <img src="/image/feature_importance.png" class="img-full" alt="Feature Importances">
         <div class="insight">
-            Cholesterol and Blood Pressure are the most informative features for distinguishing the two
-            diagnoses, which is clinically intuitive.
+            Prior inpatient visits (<code>number_inpatient</code>) is the strongest single
+            predictor — patients with a history of inpatient care are most at risk. Discharge
+            disposition, number of medications, and time in hospital also rank highly.
         </div>
     </div>
 </div>
 
 <div class="card">
-    <h2>Prediction Form</h2>
+    <h2>Predict Readmission Risk</h2>
     <p style="color:#555; margin-bottom:1rem; font-size:0.9rem;">
-        Enter patient clinical values below to receive a diagnosis prediction with class probabilities.
+        Enter patient clinical details to receive an early readmission risk prediction.
     </p>
     <form method="POST" action="/model">
         <div class="form-grid">
             <div class="form-group">
-                <label for="age">Age (years)</label>
-                <input type="number" id="age" name="age" min="18" max="100"
-                       value="{{ form.age or 50 }}" required>
-            </div>
-            <div class="form-group">
-                <label for="bp">Blood Pressure (mmHg)</label>
-                <input type="number" id="bp" name="bp" min="60" max="220"
-                       value="{{ form.bp or 130 }}" required>
-            </div>
-            <div class="form-group">
-                <label for="chol">Cholesterol (mg/dL)</label>
-                <input type="number" id="chol" name="chol" min="100" max="400"
-                       value="{{ form.chol or 220 }}" required>
-            </div>
-            <div class="form-group">
-                <label for="bmi">BMI</label>
-                <input type="number" id="bmi" name="bmi" min="10" max="60" step="0.1"
-                       value="{{ form.bmi or 27.0 }}" required>
-            </div>
-            <div class="form-group">
-                <label for="smoker">Smoker</label>
-                <select id="smoker" name="smoker">
-                    <option value="NO" {% if form.smoker == 'NO' %}selected{% endif %}>No</option>
-                    <option value="YES" {% if form.smoker == 'YES' %}selected{% endif %}>Yes</option>
+                <label for="age_range">Age Group</label>
+                <select id="age_range" name="age_range">
+                    {% for ar in age_ranges %}
+                    <option value="{{ ar }}" {% if form.get('age_range') == ar %}selected{% endif %}>{{ ar }}</option>
+                    {% endfor %}
                 </select>
             </div>
             <div class="form-group">
                 <label for="gender">Gender</label>
                 <select id="gender" name="gender">
-                    <option value="MALE" {% if form.gender == 'MALE' %}selected{% endif %}>Male</option>
-                    <option value="FEMALE" {% if form.gender == 'FEMALE' %}selected{% endif %}>Female</option>
+                    <option value="Female" {% if form.get('gender') == 'Female' %}selected{% endif %}>Female</option>
+                    <option value="Male"   {% if form.get('gender') == 'Male'   %}selected{% endif %}>Male</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="race">Race</label>
+                <select id="race" name="race">
+                    <option value="Caucasian"       {% if form.get('race') == 'Caucasian'       %}selected{% endif %}>Caucasian</option>
+                    <option value="AfricanAmerican" {% if form.get('race') == 'AfricanAmerican' %}selected{% endif %}>African American</option>
+                    <option value="Hispanic"        {% if form.get('race') == 'Hispanic'        %}selected{% endif %}>Hispanic</option>
+                    <option value="Asian"           {% if form.get('race') == 'Asian'           %}selected{% endif %}>Asian</option>
+                    <option value="Other"           {% if form.get('race') == 'Other'           %}selected{% endif %}>Other</option>
+                    <option value="Unknown"         {% if form.get('race') == 'Unknown'         %}selected{% endif %}>Unknown</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="admission_type">Admission Type</label>
+                <select id="admission_type" name="admission_type">
+                    <option value="1" {% if form.get('admission_type') == '1' %}selected{% endif %}>Emergency</option>
+                    <option value="2" {% if form.get('admission_type') == '2' %}selected{% endif %}>Urgent</option>
+                    <option value="3" {% if form.get('admission_type') == '3' %}selected{% endif %}>Elective</option>
+                    <option value="5" {% if form.get('admission_type') == '5' %}selected{% endif %}>Other / Not Available</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="time_in_hospital">Time in Hospital (days)</label>
+                <input type="number" id="time_in_hospital" name="time_in_hospital"
+                       min="1" max="14" value="{{ form.get('time_in_hospital', 4) }}" required>
+            </div>
+            <div class="form-group">
+                <label for="num_lab_procedures">Number of Lab Procedures</label>
+                <input type="number" id="num_lab_procedures" name="num_lab_procedures"
+                       min="0" max="132" value="{{ form.get('num_lab_procedures', 43) }}" required>
+            </div>
+            <div class="form-group">
+                <label for="num_procedures">Number of Procedures</label>
+                <input type="number" id="num_procedures" name="num_procedures"
+                       min="0" max="6" value="{{ form.get('num_procedures', 1) }}" required>
+            </div>
+            <div class="form-group">
+                <label for="num_medications">Number of Medications</label>
+                <input type="number" id="num_medications" name="num_medications"
+                       min="1" max="81" value="{{ form.get('num_medications', 16) }}" required>
+            </div>
+            <div class="form-group">
+                <label for="number_outpatient">Outpatient Visits (prior year)</label>
+                <input type="number" id="number_outpatient" name="number_outpatient"
+                       min="0" max="42" value="{{ form.get('number_outpatient', 0) }}" required>
+            </div>
+            <div class="form-group">
+                <label for="number_emergency">Emergency Visits (prior year)</label>
+                <input type="number" id="number_emergency" name="number_emergency"
+                       min="0" max="76" value="{{ form.get('number_emergency', 0) }}" required>
+            </div>
+            <div class="form-group">
+                <label for="number_inpatient">Inpatient Visits (prior year)</label>
+                <input type="number" id="number_inpatient" name="number_inpatient"
+                       min="0" max="21" value="{{ form.get('number_inpatient', 0) }}" required>
+            </div>
+            <div class="form-group">
+                <label for="number_diagnoses">Number of Diagnoses</label>
+                <input type="number" id="number_diagnoses" name="number_diagnoses"
+                       min="1" max="16" value="{{ form.get('number_diagnoses', 7) }}" required>
+            </div>
+            <div class="form-group">
+                <label for="diag_1_category">Primary Diagnosis Category</label>
+                <select id="diag_1_category" name="diag_1_category">
+                    {% for cat in diag_cats %}
+                    <option value="{{ cat }}" {% if form.get('diag_1_category') == cat %}selected{% endif %}>{{ cat }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="a1c_result">HbA1c Result</label>
+                <select id="a1c_result" name="a1c_result">
+                    <option value="None" {% if form.get('a1c_result') == 'None' %}selected{% endif %}>Not Tested</option>
+                    <option value="Norm" {% if form.get('a1c_result') == 'Norm' %}selected{% endif %}>Normal</option>
+                    <option value=">7"  {% if form.get('a1c_result') == '>7'   %}selected{% endif %}>Greater than 7%</option>
+                    <option value=">8"  {% if form.get('a1c_result') == '>8'   %}selected{% endif %}>Greater than 8%</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="glu_serum">Max Glucose Serum</label>
+                <select id="glu_serum" name="glu_serum">
+                    <option value="None"  {% if form.get('glu_serum') == 'None'  %}selected{% endif %}>Not Tested</option>
+                    <option value="Norm"  {% if form.get('glu_serum') == 'Norm'  %}selected{% endif %}>Normal</option>
+                    <option value=">200"  {% if form.get('glu_serum') == '>200'  %}selected{% endif %}>Greater than 200</option>
+                    <option value=">300"  {% if form.get('glu_serum') == '>300'  %}selected{% endif %}>Greater than 300</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="insulin">Insulin</label>
+                <select id="insulin" name="insulin">
+                    <option value="No"     {% if form.get('insulin') == 'No'     %}selected{% endif %}>Not prescribed</option>
+                    <option value="Steady" {% if form.get('insulin') == 'Steady' %}selected{% endif %}>Steady dose</option>
+                    <option value="Up"     {% if form.get('insulin') == 'Up'     %}selected{% endif %}>Dose increased</option>
+                    <option value="Down"   {% if form.get('insulin') == 'Down'   %}selected{% endif %}>Dose decreased</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="diabetes_med">On Diabetes Medication</label>
+                <select id="diabetes_med" name="diabetes_med">
+                    <option value="Yes" {% if form.get('diabetes_med') == 'Yes' %}selected{% endif %}>Yes</option>
+                    <option value="No"  {% if form.get('diabetes_med') == 'No'  %}selected{% endif %}>No</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="medication_changed">Medication Changed</label>
+                <select id="medication_changed" name="medication_changed">
+                    <option value="No" {% if form.get('medication_changed') == 'No' %}selected{% endif %}>No change</option>
+                    <option value="Ch" {% if form.get('medication_changed') == 'Ch' %}selected{% endif %}>Changed</option>
                 </select>
             </div>
         </div>
-        <button type="submit" class="btn">Predict Diagnosis</button>
+        <button type="submit" class="btn">Predict Readmission Risk</button>
     </form>
 
     {% if result %}
-    <div class="result-box">
-        <h3>Predicted Diagnosis:
-            <span class="badge {% if result.diagnosis == 'DIABETES' %}badge-blue{% else %}badge-red{% endif %}" style="font-size:1rem;">
-                {{ result.diagnosis }}
-            </span>
-        </h3>
-        <p style="color:#555; font-size:0.88rem; margin: 0.5rem 0 1rem;">Class probabilities:</p>
-        {% for cls, prob in result.probabilities.items() %}
-        <div class="prob-bar-wrap">
-            <div class="prob-label">{{ cls }}: {{ prob }}%</div>
-            <div class="prob-bar-bg">
-                <div class="prob-bar-fill {% if cls == 'DIABETES' %}diabetes{% else %}heart{% endif %}"
-                     style="width: {{ prob }}%;"></div>
+    <div class="result-box" style="{% if result.prediction == 1 %}border-color:#e74c3c; background:#fff5f5;{% else %}border-color:#27ae60; background:#f0fff4;{% endif %}">
+        {% if result.error is defined %}
+            <h3 style="color:#c0392b;">Error: {{ result.error }}</h3>
+        {% else %}
+            <h3>Prediction:
+                <span class="badge {% if result.prediction == 1 %}badge-red{% else %}badge-green{% endif %}" style="font-size:1rem;">
+                    {{ result.label }}
+                </span>
+            </h3>
+            <p style="color:#555; font-size:0.88rem; margin: 0.5rem 0 1rem;">Model confidence (probability):</p>
+            {% for cls, prob in result.probabilities.items() %}
+            <div class="prob-bar-wrap">
+                <div class="prob-label">{{ cls }}: {{ prob }}%</div>
+                <div class="prob-bar-bg">
+                    <div class="prob-bar-fill {% if 'High' in cls %}heart{% else %}diabetes{% endif %}"
+                         style="width: {{ prob }}%;"></div>
+                </div>
             </div>
-        </div>
-        {% endfor %}
+            {% endfor %}
+            <p style="margin-top:1rem; font-size:0.82rem; color:#777;">
+                <strong>Disclaimer:</strong> This is a research tool for educational purposes only.
+                Do not use for clinical decision-making.
+            </p>
+        {% endif %}
     </div>
     {% endif %}
 </div>
 
 <div class="card">
     <h2>Classification Report</h2>
-    <pre style="background:#f9f9f9; padding:1rem; border-radius:5px; font-size:0.85rem; overflow-x:auto;">{{ metrics.report }}</pre>
+    <pre style="background:#f9f9f9; padding:1rem; border-radius:5px; font-size:0.85rem; overflow-x:auto;">{{ metrics.test_performance.report | tojson(indent=2) }}</pre>
     <div class="insight">
-        <strong>Note on performance:</strong> With only 52 labelled samples (split 75/25),
-        the test set contains just 13 records. Accuracy on such a small test set is highly sensitive to
-        individual predictions. The 5-fold cross-validation score ({{ metrics.cv_mean }}%) is a more
-        reliable estimate of generalisation performance.
+        <strong>ROC-AUC = {{ (metrics.test_performance.roc_auc * 100) | round(1) }}%</strong> —
+        significantly better than the 50% random baseline.
+        5-fold CV ROC-AUC of {{ (metrics.cross_validation.cv_roc_auc_mean * 100) | round(1) }}%
+        (± {{ (metrics.cross_validation.cv_roc_auc_std * 100) | round(1) }}%) confirms consistent generalisation.
+        Class imbalance (~11% positive rate) means accuracy alone is misleading;
+        ROC-AUC is the primary evaluation metric.
     </div>
 </div>
 

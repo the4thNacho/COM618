@@ -1,520 +1,85 @@
 {% extends "base.html" %}
-{% block title %}Data Exploration — Medical Data Analysis{% endblock %}
+{% block title %}Exploration — Diabetes Readmission{% endblock %}
 {% block content %}
 
-<h1>Data Exploration &amp; Pattern Discovery</h1>
-<p class="subtitle">Mining the cleaned dataset for significant trends using Seaborn and Matplotlib visualisations.</p>
+<h1>Data Exploration</h1>
+<p class="subtitle">Patterns and trends in the cleaned Diabetes 130-US Hospitals dataset.</p>
 
-<div class="card">
-    <h2>Diagnosis Distribution</h2>
-    <img src="/image/diagnosis_distribution.png" class="img-full" alt="Diagnosis Distribution">
-    <div class="insight">
-        <strong>Insight:</strong> The dataset is relatively balanced between DIABETES (27 patients) and HEART DISEASE (25 patients),
-        with 48 patients recorded as UNKNOWN (undiagnosed or missing diagnosis).
-        The labelled subset is small but balanced enough for binary classification.
+<div class="img-grid">
+    <div class="card">
+        <h2>Readmission Class Distribution</h2>
+        <img src="/image/diagnosis_distribution.png" class="img-full" alt="Readmission Distribution">
+        <div class="insight">
+            The dataset is heavily imbalanced: only ~11% of encounters result in early
+            readmission (&lt;30 days). This imbalance is handled in the model via
+            balanced sample weighting.
+        </div>
     </div>
-</div>
 
-<div class="card">
-    <h2>Feature Distributions by Diagnosis</h2>
-    <img src="/image/feature_boxplots.png" class="img-full" alt="Feature Box Plots by Diagnosis">
-    <div class="insight">
-        <strong>Insight:</strong> Heart Disease patients tend to have higher Blood Pressure and Cholesterol levels
-        compared to Diabetes patients. BMI is elevated in both groups. Age ranges overlap significantly,
-        though Heart Disease patients skew slightly older.
-    </div>
-</div>
-
-<div class="card">
-    <h2>Correlation Heatmap</h2>
-    <img src="/image/correlation_heatmap.png" class="img-full" alt="Correlation Heatmap">
-    <div class="insight">
-        <strong>Insight:</strong> Numerical features show weak-to-moderate correlations with each other,
-        meaning they each contribute independent information to the predictive model.
-        Blood Pressure and Cholesterol have the strongest positive correlation.
+    <div class="card">
+        <h2>Numerical Feature Correlations</h2>
+        <img src="/image/correlation_heatmap.png" class="img-full" alt="Correlation Heatmap">
+        <div class="insight">
+            <strong>number_inpatient</strong> has the strongest positive correlation with
+            early readmission — patients with more previous inpatient visits are significantly
+            more likely to be readmitted early. Number of medications and diagnoses also
+            show moderate positive correlation.
+        </div>
     </div>
 </div>
 
 <div class="img-grid">
     <div class="card">
-        <h2>Smoker Status vs Diagnosis</h2>
-        <img src="/image/smoker_diagnosis.png" class="img-full" alt="Smoker vs Diagnosis">
+        <h2>Readmission Rate by Age Group</h2>
+        <img src="/image/age_readmission.png" class="img-full" alt="Age vs Readmission">
         <div class="insight">
-            <strong>Insight:</strong> Smokers have a higher proportion of Heart Disease cases,
-            consistent with established medical evidence linking smoking to cardiovascular disease.
+            Younger patients (under 30) and older patients (70+) show slightly elevated
+            readmission rates. Middle-aged patients (40–60) form the largest encounter
+            group but do not have disproportionately high readmission rates.
         </div>
     </div>
 
     <div class="card">
-        <h2>Gender vs Diagnosis</h2>
-        <img src="/image/gender_diagnosis.png" class="img-full" alt="Gender vs Diagnosis">
+        <h2>Readmission Rate by Primary Diagnosis</h2>
+        <img src="/image/diag_readmission.png" class="img-full" alt="Diagnosis vs Readmission">
         <div class="insight">
-            <strong>Insight:</strong> Both genders appear across both diagnoses.
-            Male patients show a slightly higher rate of Heart Disease in this dataset.
+            Injury and Circulatory disease patients have the highest early readmission rates,
+            while Musculoskeletal and Digestive disease patients are least likely to be
+            readmitted early. This information is captured by the ICD-9 category feature.
         </div>
     </div>
 </div>
 
-<div class="card">
-    <h2>Age vs BMI Scatter (by Diagnosis)</h2>
-    <img src="/image/age_bmi_scatter.png" class="img-full" alt="Age vs BMI Scatter">
+<div class="img-grid">
+    <div class="card">
+        <h2>Readmission Rate by Insulin Usage</h2>
+        <img src="/image/medication_readmission.png" class="img-full" alt="Medication vs Readmission">
+        <div class="insight">
+            Patients whose insulin dose was <strong>reduced (Down)</strong> during admission have
+            a notably higher early readmission rate — suggesting inadequate glycaemic management.
+            The direction of dose change (not just whether it was prescribed) is a meaningful signal.
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Time in Hospital by Readmission</h2>
+        <img src="/image/time_in_hospital.png" class="img-full" alt="Time in Hospital">
+        <div class="insight">
+            Longer hospital stays are associated with higher early readmission probability,
+            which may reflect greater underlying disease complexity. Shorter stays (1–2 days)
+            also show elevated rates — possibly premature discharge.
+        </div>
+    </div>
+</div>
+
+<div class="card" style="max-width:700px; margin:0 auto 1.5rem;">
+    <h2>Readmission Rate by Race</h2>
+    <img src="/image/race_readmission.png" class="img-full" alt="Race vs Readmission">
     <div class="insight">
-        <strong>Insight:</strong> There is no clear linear separation between the two classes in the Age–BMI
-        plane, which confirms that a non-linear model (K-Nearest Neighbors) is appropriate for this dataset.
-        Both conditions span a wide range of ages and BMI values.
+        There is limited variation in readmission rates across racial groups in this dataset.
+        Any differences observed should be interpreted cautiously given the imbalanced
+        and potentially incomplete racial classification in administrative records.
     </div>
 </div>
-
-<!-- Interactive K-Means Clustering Section -->
-<div class="card">
-    <h2>Interactive K-Means Clustering Analysis</h2>
-    <p class="subtitle">Discover hidden patterns in patient data using interactive clustering with real-time parameter adjustment.</p>
-    
-    <div style="display: grid; grid-template-columns: 300px 1fr; gap: 2rem; margin-top: 1.5rem;">
-        
-        <!-- Controls Panel -->
-        <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border: 1px solid #e9ecef;">
-            <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
-                <strong>Auto-Update:</strong><br>
-                <small>Visualizations update automatically as you adjust parameters</small>
-            </div>
-            
-            <div class="form-group" style="margin-bottom: 1.5rem;">
-                <button id="elbow-btn" style="
-                    width: 100%;
-                    padding: 0.8rem;
-                    background: #6f42c1;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: background-color 0.3s;
-                " onmouseover="this.style.backgroundColor='#5a2d91'" onmouseout="this.style.backgroundColor='#6f42c1'">
-                    Generate Elbow Analysis
-                </button>
-                <p style="font-size: 0.85em; color: #6c757d; margin-top: 0.5rem;">
-                    Find optimal number of clusters using elbow method and silhouette analysis
-                </p>
-            </div>
-            
-            <div class="form-group" style="margin-bottom: 1.5rem;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                    <label style="font-weight: 600; color: #495057;">Number of Clusters</label>
-                    <span id="clusters-value" style="font-weight: bold; color: #6f42c1; background: #f8f9fa; padding: 0.2rem 0.5rem; border-radius: 3px;">3</span>
-                </div>
-                <input type="range" id="clusters-slider" min="2" max="8" value="3" step="1" style="
-                    width: 100%;
-                    height: 6px;
-                    border-radius: 3px;
-                    background: #ddd;
-                    outline: none;
-                    -webkit-appearance: none;
-                ">
-                <p style="font-size: 0.85em; color: #6c757d; margin-top: 0.5rem;">
-                    How many groups to partition patients into (2-8 clusters)
-                </p>
-            </div>
-            
-            <div class="form-group" style="margin-bottom: 1.5rem;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                    <label style="font-weight: 600; color: #495057;">Max Iterations</label>
-                    <span id="iterations-value" style="font-weight: bold; color: #6f42c1; background: #f8f9fa; padding: 0.2rem 0.5rem; border-radius: 3px;">300</span>
-                </div>
-                <input type="range" id="iterations-slider" min="100" max="1000" value="300" step="50" style="
-                    width: 100%;
-                    height: 6px;
-                    border-radius: 3px;
-                    background: #ddd;
-                    outline: none;
-                    -webkit-appearance: none;
-                ">
-                <p style="font-size: 0.85em; color: #6c757d; margin-top: 0.5rem;">
-                    Maximum iterations before stopping (higher = more thorough)
-                </p>
-            </div>
-            
-            <button id="cluster-btn" style="
-                width: 100%;
-                padding: 0.8rem;
-                background: #28a745;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-weight: 600;
-                cursor: pointer;
-                transition: background-color 0.3s;
-            " onmouseover="this.style.backgroundColor='#218838'" onmouseout="this.style.backgroundColor='#28a745'">
-                Apply Clustering
-            </button>
-        </div>
-        
-        <!-- Results Panel -->
-        <div id="clustering-results">
-            <div id="clustering-loading" style="display: none; text-align: center; padding: 3rem; color: #6c757d;">
-                <div style="font-size: 2rem; margin-bottom: 1rem;">Loading...</div>
-                <p>Running clustering analysis...</p>
-            </div>
-            
-            <div id="clustering-content">
-                <div style="text-align: center; padding: 3rem; color: #6c757d; border: 2px dashed #dee2e6; border-radius: 8px;">
-                    <div style="font-size: 3rem; margin-bottom: 1rem;">Ready</div>
-                    <h3>Ready for Clustering Analysis</h3>
-                    <p>Click "Generate Elbow Analysis" to find optimal clusters, then "Apply Clustering" to see patient groupings</p>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Add CSS for range sliders -->
-<style>
-/* Webkit (Chrome, Safari) */
-input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: #6f42c1;
-    cursor: pointer;
-    transition: all 0.3s;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-}
-
-input[type="range"]::-webkit-slider-thumb:hover {
-    background: #5a2d91;
-    transform: scale(1.1);
-}
-
-/* Firefox */
-input[type="range"]::-moz-range-thumb {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: #6f42c1;
-    cursor: pointer;
-    border: none;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-}
-
-/* Image Modal Styles */
-.image-modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.9);
-    cursor: pointer;
-}
-
-.image-modal-content {
-    display: block;
-    margin: auto;
-    max-width: 95%;
-    max-height: 95%;
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    border-radius: 8px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-}
-
-.image-modal-caption {
-    display: block;
-    width: 80%;
-    max-width: 600px;
-    text-align: center;
-    color: #ccc;
-    padding: 10px 0;
-    height: 50px;
-    position: absolute;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 18px;
-}
-
-.close-modal {
-    position: absolute;
-    top: 30px;
-    right: 50px;
-    color: #fff;
-    font-size: 40px;
-    font-weight: bold;
-    cursor: pointer;
-    z-index: 1001;
-}
-
-.close-modal:hover {
-    color: #bbb;
-}
-</style>
-
-<!-- Image Modal -->
-<div id="imageModal" class="image-modal" onclick="closeImageModal()">
-    <span class="close-modal" onclick="closeImageModal()">&times;</span>
-    <img class="image-modal-content" id="modalImage">
-    <div class="image-modal-caption" id="modalCaption"></div>
-</div>
-
-<!-- JavaScript for Interactive Clustering -->
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    
-    // Slider value updates
-    const clustersSlider = document.getElementById('clusters-slider');
-    const iterationsSlider = document.getElementById('iterations-slider');
-    const clustersValue = document.getElementById('clusters-value');
-    const iterationsValue = document.getElementById('iterations-value');
-    
-    clustersSlider.addEventListener('input', function() {
-        clustersValue.textContent = this.value;
-    });
-    
-    iterationsSlider.addEventListener('input', function() {
-        iterationsValue.textContent = this.value;
-    });
-    
-    // Elbow analysis button
-    document.getElementById('elbow-btn').addEventListener('click', function() {
-        showLoading();
-        
-        fetch('/api/clustering/elbow')
-            .then(response => response.json())
-            .then(data => {
-                hideLoading();
-                if (data.status === 'success') {
-                    displayElbowResults(data.data);
-                } else {
-                    showError('Elbow analysis failed: ' + data.message);
-                }
-            })
-            .catch(error => {
-                hideLoading();
-                showError('Network error: ' + error.message);
-            });
-    });
-    
-    // Clustering button
-    document.getElementById('cluster-btn').addEventListener('click', function() {
-        const nClusters = parseInt(clustersSlider.value);
-        const maxIter = parseInt(iterationsSlider.value);
-        
-        showLoading();
-        
-        fetch('/api/clustering/kmeans', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                n_clusters: nClusters,
-                max_iter: maxIter
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            hideLoading();
-            if (data.status === 'success') {
-                displayClusteringResults(data.data);
-            } else {
-                showError('Clustering failed: ' + data.message);
-            }
-        })
-        .catch(error => {
-            hideLoading();
-            showError('Network error: ' + error.message);
-        });
-    });
-    
-    function showLoading() {
-        document.getElementById('clustering-loading').style.display = 'block';
-        document.getElementById('clustering-content').style.display = 'none';
-    }
-    
-    function hideLoading() {
-        document.getElementById('clustering-loading').style.display = 'none';
-        document.getElementById('clustering-content').style.display = 'block';
-    }
-    
-    function displayElbowResults(data) {
-        const content = document.getElementById('clustering-content');
-        content.innerHTML = `
-            <div>
-                <h3>Elbow Analysis Results</h3>
-                <div style="background: #e8f5e8; border: 1px solid #28a745; border-radius: 8px; padding: 1rem; margin: 1rem 0;">
-                    <strong>Recommended:</strong> k = ${data.suggested_k} clusters
-                    <br><small>Based on highest silhouette score analysis</small>
-                </div>
-                
-                <div style="text-align: center; margin: 1.5rem 0;">
-                    <img src="/image/${data.elbow_plot_path}" style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" alt="Elbow Analysis">
-                </div>
-                
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;">
-                    <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px;">
-                        <strong>Silhouette Scores:</strong>
-                        <ul style="margin: 0.5rem 0; padding-left: 1.2rem;">
-                            ${data.k_range.map((k, i) => 
-                                `<li>k=${k}: ${data.silhouette_scores[i]}${k === data.suggested_k ? ' (Recommended)' : ''}</li>`
-                            ).join('')}
-                        </ul>
-                    </div>
-                    <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px;">
-                        <strong>Next Step:</strong>
-                        <p style="margin: 0.5rem 0; font-size: 0.9rem;">
-                            Set clusters to ${data.suggested_k} and click "Apply Clustering" to see patient groupings.
-                        </p>
-                    </div>
-                </div>
-            </div>
-        `;
-        
-        // Auto-update slider to suggested value
-        clustersSlider.value = data.suggested_k;
-        clustersValue.textContent = data.suggested_k;
-    }
-    
-    function displayClusteringResults(data) {
-        const content = document.getElementById('clustering-content');
-        
-        // Generate cluster summary
-        const clusterSummary = Object.keys(data.cluster_stats).map(clusterId => {
-            const stats = data.cluster_stats[clusterId];
-            const clusterNum = clusterId.replace('cluster_', '');
-            return `
-                <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; border-left: 4px solid #6f42c1;">
-                    <strong>Cluster ${clusterNum}</strong> (${stats.size} patients)
-                    <br><small>
-                        Avg Age: ${stats.feature_means.Age}, 
-                        BP: ${stats.feature_means.Blood_Pressure}, 
-                        Cholesterol: ${stats.feature_means.Cholesterol}
-                    </small>
-                </div>
-            `;
-        }).join('');
-        
-        content.innerHTML = `
-            <div>
-                <h3>K-Means Clustering Results (k=${data.n_clusters})</h3>
-                
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-                    <div style="text-align: center; padding: 1rem; background: #e8f5e8; border-radius: 6px;">
-                        <strong>Silhouette Score</strong>
-                        <div style="font-size: 1.5em; font-weight: bold; color: #28a745;">${data.silhouette_score}</div>
-                        <small>Higher is better (max 1.0)</small>
-                    </div>
-                    <div style="text-align: center; padding: 1rem; background: #e3f2fd; border-radius: 6px;">
-                        <strong>Davies-Bouldin</strong>
-                        <div style="font-size: 1.5em; font-weight: bold; color: #1976d2;">${data.davies_bouldin_score}</div>
-                        <small>Lower is better</small>
-                    </div>
-                    <div style="text-align: center; padding: 1rem; background: #fce4ec; border-radius: 6px;">
-                        <strong>Inertia</strong>
-                        <div style="font-size: 1.5em; font-weight: bold; color: #c2185b;">${data.inertia}</div>
-                        <small>Within-cluster variance</small>
-                    </div>
-                </div>
-                
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin: 1.5rem 0;">
-                    <div>
-                        <h4>PCA Cluster View</h4>
-                        <img src="/image/kmeans_pca_clusters.png" 
-                             style="width: 100%; min-height: 400px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor: pointer; transition: transform 0.2s;" 
-                             alt="PCA Clusters"
-                             onclick="openImageModal(this.src, 'PCA Cluster View')"
-                             onmouseover="this.style.transform='scale(1.02)'"
-                             onmouseout="this.style.transform='scale(1)'">
-                        <p style="font-size: 0.9em; color: #666; margin-top: 0.5rem;">Click to enlarge</p>
-                    </div>
-                    <div>
-                        <h4>Feature Distributions</h4>
-                        <img src="/image/kmeans_feature_distributions.png" 
-                             style="width: 100%; min-height: 400px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor: pointer; transition: transform 0.2s;" 
-                             alt="Feature Distributions"
-                             onclick="openImageModal(this.src, 'Feature Distributions')"
-                             onmouseover="this.style.transform='scale(1.02)'"
-                             onmouseout="this.style.transform='scale(1)'">
-                        <p style="font-size: 0.9em; color: #666; margin-top: 0.5rem;">Click to enlarge</p>
-                    </div>
-                </div>
-                
-                <div style="margin: 1.5rem 0;">
-                    <div>
-                        <h4>Diagnosis Composition</h4>
-                        <img src="/image/kmeans_cluster_composition.png" 
-                             style="width: 80%; max-width: 800px; min-height: 400px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor: pointer; transition: transform 0.2s; display: block; margin: 0 auto;" 
-                             alt="Cluster Composition"
-                             onclick="openImageModal(this.src, 'Diagnosis Composition')"
-                             onmouseover="this.style.transform='scale(1.02)'"
-                             onmouseout="this.style.transform='scale(1)'">
-                        <p style="font-size: 0.9em; color: #666; margin-top: 0.5rem; text-align: center;">Click to enlarge</p>
-                    </div>
-                </div>
-                
-                <div>
-                    <h4>Cluster Characteristics</h4>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-                        ${clusterSummary}
-                    </div>
-                </div>
-                
-                <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; padding: 1rem; margin-top: 1rem;">
-                    <strong>Clinical Insights:</strong>
-                    <p style="margin: 0.5rem 0; font-size: 0.9rem;">
-                        Cluster analysis reveals patient subgroups with similar clinical profiles. 
-                        Each cluster represents patients who share common characteristics in age, blood pressure, cholesterol, and BMI patterns.
-                        This can help identify patient populations that might benefit from tailored treatment approaches.
-                    </p>
-                </div>
-            </div>
-        `;
-    }
-    
-    function showError(message) {
-        const content = document.getElementById('clustering-content');
-        content.innerHTML = `
-            <div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 1rem; border-radius: 6px; text-align: center;">
-                <strong>Error:</strong> ${message}
-                <br><small>Please try again or check the console for more details.</small>
-            </div>
-        `;
-    }
-});
-
-// Image Modal Functions
-function openImageModal(src, caption) {
-    const modal = document.getElementById('imageModal');
-    const modalImg = document.getElementById('modalImage');
-    const modalCaption = document.getElementById('modalCaption');
-    
-    modal.style.display = 'block';
-    modalImg.src = src;
-    modalCaption.textContent = caption;
-    
-    // Prevent body scrolling when modal is open
-    document.body.style.overflow = 'hidden';
-}
-
-function closeImageModal() {
-    const modal = document.getElementById('imageModal');
-    modal.style.display = 'none';
-    
-    // Restore body scrolling
-    document.body.style.overflow = 'auto';
-}
-
-// Close modal with Escape key
-document.addEventListener('keydown', function(event) {
-    if (event.key === 'Escape') {
-        closeImageModal();
-    }
-});
-</script>
 
 {% endblock %}

@@ -132,18 +132,18 @@ def small_dataset_recommendations():
     """
     Print recommendations for improving model performance on small datasets.
     """
-    print("\n" + "🎯 RECOMMENDATIONS FOR SMALL DATASETS (52 samples)")
+    print("\n" + " RECOMMENDATIONS FOR SMALL DATASETS (52 samples)")
     print("=" * 65)
     
     recommendations = [
-        ("✅ Use K-Nearest Neighbors", "No training phase, works well with 50-100 samples"),
-        ("✅ Try Linear SVM", "Fewer parameters than RBF kernel, less overfitting"),
-        ("✅ Strong Regularization", "Use L1/L2 penalties to prevent overfitting"),
-        ("✅ Cross-Validation", "Use LOO or stratified k-fold for reliable estimates"),
-        ("✅ Feature Selection", "Reduce dimensionality to avoid curse of dimensionality"),
-        ("⚠️  Avoid Deep Models", "Neural networks, deep trees need 1000+ samples"),
-        ("⚠️  Careful with Ensembles", "Random Forest can overfit with <100 samples"),
-        ("❌ No Boosting (XGBoost)", "Typically needs 500+ samples to work well")
+        (" Use K-Nearest Neighbors", "No training phase, works well with 50-100 samples"),
+        (" Try Linear SVM", "Fewer parameters than RBF kernel, less overfitting"),
+        (" Strong Regularization", "Use L1/L2 penalties to prevent overfitting"),
+        (" Cross-Validation", "Use LOO or stratified k-fold for reliable estimates"),
+        (" Feature Selection", "Reduce dimensionality to avoid curse of dimensionality"),
+        ("  Avoid Deep Models", "Neural networks, deep trees need 1000+ samples"),
+        ("  Careful with Ensembles", "Random Forest can overfit with <100 samples"),
+        (" No Boosting (XGBoost)", "Typically needs 500+ samples to work well")
     ]
     
     for title, desc in recommendations:

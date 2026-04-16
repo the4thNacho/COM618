@@ -218,7 +218,7 @@ def create_project_integration_guide():
             {
                 "step": 1,
                 "title": "Add rigorous evaluation module",
-                "action": "Create synthesise_rigorous.py with proper data splits",
+                "action": "Updated synthesise.py with rigorous methodology and proper data splits",
                 "benefit": "Demonstrates understanding of methodological rigor"
             },
             {
