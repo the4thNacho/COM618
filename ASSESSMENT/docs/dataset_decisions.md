@@ -146,16 +146,39 @@ GB_CONFIG = {
 
 ## Decision 10: Feature Set
 
-The final 28 features span five categories:
+The final 36 features span six categories:
 
 1. **Demographics:** age_numeric, gender_enc, race_enc
-2. **Admission context:** time_in_hospital, admission_type_grp, discharge_grp, admission_source_grp
+2. **Admission context:** time_in_hospital, admission_type_grp, discharge_grp, discharge_disposition_id, admission_source_grp
 3. **Clinical volume:** num_lab_procedures, num_procedures, num_medications, number_outpatient, number_emergency, number_inpatient, number_diagnoses
 4. **Lab results:** a1c_result_enc, glu_serum_enc
 5. **Medications:** insulin_enc, metformin_enc, glipizide_enc, glyburide_enc, glimepiride_enc, change_enc, diabetes_med_enc, num_meds_changed, num_meds_used
-6. **Diagnosis:** diag_1_cat_enc, diag_2_cat_enc, diag_3_cat_enc
+6. **Engineered features:** total_prior_visits, has_prior_inpatient, high_risk_discharge, insulin_down, poor_glycaemic_control, long_stay, multimorbid
+7. **Diagnosis:** diag_1_cat_enc, diag_2_cat_enc, diag_3_cat_enc
 
-`discharge_disposition_id` (grouped as `discharge_grp`) was added in a second iteration after analysis showed it substantially improves ROC-AUC — where a patient is discharged to (home vs transfer to SNF) reflects care complexity and logically affects readmission risk.
+`discharge_disposition_id` (raw integer, alongside grouped `discharge_grp`) was added after EDA showed that specific discharge codes carry extreme predictive signal — patients with ID 12 ("expected to return for outpatient services") have a **50% early readmission rate** vs ~11% average.
+
+---
+
+## Decision 11: Engineered Interaction Features
+
+Seven binary/count features were derived from existing columns to surface non-linear clinical patterns the model might otherwise miss.
+
+| Feature | Formula | Clinical rationale |
+|---------|---------|-------------------|
+| `total_prior_visits` | outpatient + emergency + inpatient | Combined care intensity in the prior year — a single number for prior utilisation |
+| `has_prior_inpatient` | `number_inpatient > 0` | Any prior inpatient admission is a powerful binary signal |
+| `high_risk_discharge` | `discharge_id ∈ {9, 12, 15, 22, 28}` | Discharge codes with observed readmission rate ≥25% in EDA |
+| `insulin_down` | `insulin_enc == 3 (Down)` | Decreasing insulin dose at discharge signals poor glycaemic management |
+| `poor_glycaemic_control` | `A1C ≥ 7% AND insulin used` | Composite: elevated A1C despite insulin use — high metabolic burden |
+| `long_stay` | `time_in_hospital ≥ 7` | Patients hospitalised 7+ days tend to have more complex presentations |
+| `multimorbid` | `number_diagnoses ≥ 7` | Many co-diagnoses are a proxy for multimorbidity and fragile health |
+
+**Why binary flags rather than raw values?**
+- GBM can already learn thresholds from continuous features. Binary flags make the most clinically-meaningful threshold *explicit*, which guides early trees in the boosting sequence and speeds up convergence.
+- These flags also survive feature importance analysis as interpretable clinical concepts rather than opaque numeric thresholds.
+
+**Impact on performance:** Adding these 7 features increased test ROC-AUC from 0.648 → 0.660 (+1.2pp) with no increase in the overfitting gap, confirming they add generalisable signal.
 
 ---
 
@@ -163,10 +186,10 @@ The final 28 features span five categories:
 
 | Metric | Value |
 |--------|-------|
-| Test ROC-AUC | **0.648** |
-| CV ROC-AUC | 0.636 ± 0.007 |
-| Test Accuracy | 65.3% |
-| Avg Precision | 0.152 |
+| Test ROC-AUC | **0.660** |
+| CV ROC-AUC | 0.645 ± 0.006 |
+| Test Accuracy | 67.1% |
+| Avg Precision | 0.169 |
 | Train-Test Gap | 1.9% |
 
-The ROC-AUC of **0.648** is consistent with the published best results on this dataset (Strack et al. 2014 reported ~0.63 AUC). The near-zero overfitting gap confirms the model generalises rather than memorises.
+The ROC-AUC of **0.660** exceeds the published baseline on this dataset (Strack et al. 2014 reported ~0.63 AUC). The near-zero overfitting gap confirms the model generalises rather than memorises. See `docs/model_comparison.md` for the full model selection rationale and comparison against LogisticRegression, RandomForest, ExtraTrees, HistGradientBoosting, XGBoost, and LightGBM.

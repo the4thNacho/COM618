@@ -5,7 +5,7 @@
 <h1>Predictive Model — Early Readmission Classifier</h1>
 <p class="subtitle">
     Gradient Boosting Classifier predicting whether a diabetic patient will be readmitted
-    within 30 days of discharge.
+    within 30 days of discharge. Selected after comparing GBM, XGBoost, LightGBM, and ensembles.
 </p>
 
 <div class="stat-row">
@@ -43,9 +43,9 @@
         <h2>Feature Importances (Top 15)</h2>
         <img src="/image/feature_importance.png" class="img-full" alt="Feature Importances">
         <div class="insight">
-            Prior inpatient visits (<code>number_inpatient</code>) is the strongest single
-            predictor — patients with a history of inpatient care are most at risk. Discharge
-            disposition, number of medications, and time in hospital also rank highly.
+            <code>discharge_disposition_id</code> is the strongest predictor — specific discharge
+            codes (e.g., "expected to return") have up to 50% readmission rates. Prior inpatient
+            visits, lab procedures, and number of medications also rank highly.
         </div>
     </div>
 </div>
@@ -222,7 +222,7 @@
         significantly better than the 50% random baseline.
         5-fold CV ROC-AUC of {{ (metrics.cross_validation.cv_roc_auc_mean * 100) | round(1) }}%
         (± {{ (metrics.cross_validation.cv_roc_auc_std * 100) | round(1) }}%) confirms consistent generalisation.
-        Class imbalance (~11% positive rate) means accuracy alone is misleading;
+        Class imbalance (~{{ minority_pct }}% positive rate) means accuracy alone is misleading;
         ROC-AUC is the primary evaluation metric.
     </div>
 </div>

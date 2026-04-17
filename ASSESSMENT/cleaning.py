@@ -191,6 +191,11 @@ def clean(raw: pd.DataFrame) -> pd.DataFrame:
         _ADMISSION_TYPE_MAP
     ).fillna(3).astype(int)
 
+    # ── Step 12a: Ensure discharge_disposition_id is clean numeric ───────────
+    df['discharge_disposition_id'] = pd.to_numeric(
+        df['discharge_disposition_id'], errors='coerce'
+    ).fillna(1).astype(int)
+
     # ── Step 12b: Group discharge disposition ─────────────────────────────────
     # Groups: 0=Home, 1=Transfer/SNF, 2=Home with services, 3=AMA/Other
     # discharge_disposition_id is available at prediction time (post-discharge).
@@ -231,6 +236,33 @@ def clean(raw: pd.DataFrame) -> pd.DataFrame:
     # ── Step 14: Binary flags ─────────────────────────────────────────────────
     df['change_enc']       = (df['change'] == 'Ch').astype(int)
     df['diabetes_med_enc'] = (df['diabetesMed'] == 'Yes').astype(int)
+
+    # ── Step 14b: High-signal interaction / derived features ──────────────────
+    # Prior care intensity — combined utilisation score
+    df['total_prior_visits'] = (
+        df['number_outpatient'] + df['number_emergency'] + df['number_inpatient']
+    )
+    df['has_prior_inpatient'] = (df['number_inpatient'] > 0).astype(int)
+
+    # High-risk discharge codes (readmission rate ≥25% in EDA)
+    HIGH_RISK_DISCHARGE = {9, 12, 15, 22, 28}
+    df['high_risk_discharge'] = df['discharge_disposition_id'].isin(
+        HIGH_RISK_DISCHARGE
+    ).astype(int)
+
+    # Insulin dose decreased — strong readmission signal from EDA
+    df['insulin_down'] = (df['insulin_enc'] == 3).astype(int)
+
+    # Poorly controlled diabetes: high A1C AND on insulin
+    df['poor_glycaemic_control'] = (
+        (df['a1c_result_enc'] >= 2) & (df['insulin_enc'] >= 1)
+    ).astype(int)
+
+    # Long-stay indicator (>= 7 days correlates with complexity)
+    df['long_stay'] = (df['time_in_hospital'] >= 7).astype(int)
+
+    # Many diagnoses — indicator of multimorbidity
+    df['multimorbid'] = (df['number_diagnoses'] >= 7).astype(int)
 
     # ── Step 15: Target variable ──────────────────────────────────────────────
     # Binary: readmitted within 30 days = 1 (early readmission), else = 0.
@@ -343,12 +375,111 @@ def generate_before_after_chart() -> str:
     return out
 
 
+def generate_before_after_columns_chart() -> str:
+    """
+    2×2 grid showing four dirty→clean column transformations:
+      1. Age: string ranges → numeric histogram
+      2. A1Cresult: raw strings → ordinal 0-3
+      3. Primary diagnosis: 700+ ICD-9 codes → 9 categories
+      4. Insulin: string → ordinal with readmission rate overlay
+    """
+    os.makedirs(CLEANING_VISUALS, exist_ok=True)
+    raw     = load_raw()
+    cleaned = run_cleaning_pipeline()
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle('Before vs After Cleaning — Column Transformations', fontsize=14, y=1.01)
+
+    # ── Panel 1: Age ────────────────────────────────────────────────────────────
+    ax = axes[0, 0]
+    age_order = list(AGE_MIDPOINTS.keys())
+    age_counts = raw['age'].value_counts().reindex(age_order, fill_value=0)
+    ax2 = ax.twinx()
+    ax.bar(range(len(age_order)), age_counts.values, color='#e74c3c', alpha=0.7, label='Raw (string)')
+    ax2.hist(cleaned['age_numeric'], bins=10, color='#2980b9', alpha=0.6, label='Clean (numeric)')
+    ax.set_xticks(range(len(age_order)))
+    ax.set_xticklabels(age_order, rotation=45, ha='right', fontsize=8)
+    ax.set_ylabel('Count (raw)', color='#e74c3c')
+    ax2.set_ylabel('Count (cleaned)', color='#2980b9')
+    ax.set_title('Age: "[60-70)" → 65 (midpoint)', fontsize=11)
+    lines1, labels1 = ax.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(lines1 + lines2, labels1 + labels2, fontsize=8, loc='upper left')
+
+    # ── Panel 2: A1Cresult ──────────────────────────────────────────────────────
+    ax = axes[0, 1]
+    raw_a1c = raw['A1Cresult'].fillna('None').value_counts()
+    clean_a1c = cleaned['a1c_result_enc'].value_counts().sort_index()
+    x_pos = [0, 1, 2, 3]
+    enc_labels = ['None (0)', 'Norm (1)', '>7 (2)', '>8 (3)']
+    # raw bar
+    raw_vals = [raw_a1c.get(k, 0) for k in ['None', 'Norm', '>7', '>8']]
+    ax_r = ax.twinx()
+    ax.bar([p - 0.2 for p in x_pos], raw_vals, width=0.35,
+           color='#e74c3c', alpha=0.7, label='Raw (string)')
+    ax_r.bar([p + 0.2 for p in x_pos],
+             [clean_a1c.get(i, 0) for i in range(4)], width=0.35,
+             color='#2980b9', alpha=0.7, label='Clean (ordinal 0-3)')
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(enc_labels, fontsize=9)
+    ax.set_ylabel('Count (raw)', color='#e74c3c')
+    ax_r.set_ylabel('Count (clean)', color='#2980b9')
+    ax.set_title('A1Cresult: missing/"?" → ordinal 0–3', fontsize=11)
+    lines1, labels1 = ax.get_legend_handles_labels()
+    lines2, labels2 = ax_r.get_legend_handles_labels()
+    ax.legend(lines1 + lines2, labels1 + labels2, fontsize=8, loc='upper right')
+
+    # ── Panel 3: ICD-9 diagnosis code reduction ──────────────────────────────────
+    ax = axes[1, 0]
+    raw_diag = raw['diag_1'].dropna()
+    n_raw_unique = raw_diag.nunique()
+    clean_diag = cleaned['diag_1_category'].value_counts()
+    order = ['Diabetes', 'Circulatory', 'Respiratory', 'Digestive',
+             'Genitourinary', 'Musculoskeletal', 'Injury', 'Neoplasms', 'Other']
+    vals = [clean_diag.get(c, 0) for c in order]
+    colours = plt.cm.Set3(np.linspace(0, 1, 9))
+    bars = ax.barh(order, vals, color=colours, edgecolor='black')
+    ax.bar_label(bars, fmt='%d', padding=3, fontsize=8)
+    ax.set_title(f'ICD-9 diag_1: {n_raw_unique} unique codes → 9 categories', fontsize=11)
+    ax.set_xlabel('Patient Count')
+    ax.grid(axis='x', alpha=0.3)
+
+    # ── Panel 4: Insulin encoding with readmission rate ─────────────────────────
+    ax = axes[1, 1]
+    insulin_vals = ['No', 'Steady', 'Up', 'Down']
+    enc_map = {'No': 0, 'Steady': 1, 'Up': 2, 'Down': 3}
+    raw_counts = [raw['insulin'].fillna('No').value_counts().get(v, 0) for v in insulin_vals]
+    clean_rates = []
+    for v in insulin_vals:
+        enc = enc_map[v]
+        mask = cleaned['insulin_enc'] == enc
+        rate = cleaned.loc[mask, 'readmitted_early'].mean() * 100 if mask.sum() > 0 else 0
+        clean_rates.append(round(rate, 1))
+    colours_ins = ['#95a5a6', '#3498db', '#27ae60', '#e74c3c']
+    ax_r2 = ax.twinx()
+    ax.bar(insulin_vals, raw_counts, color=colours_ins, alpha=0.65, label='Patient count (raw)')
+    ax_r2.plot(insulin_vals, clean_rates, 'ko-', lw=2, ms=8, label='Readmission rate %')
+    ax.set_ylabel('Patient Count (raw)', fontsize=10)
+    ax_r2.set_ylabel('Early Readmission Rate (%)', fontsize=10)
+    ax.set_title('Insulin: string → ordinal 0-3 (with readmission rate)', fontsize=11)
+    lines1, labels1 = ax.get_legend_handles_labels()
+    lines2, labels2 = ax_r2.get_legend_handles_labels()
+    ax.legend(lines1 + lines2, labels1 + labels2, fontsize=8, loc='upper left')
+
+    plt.tight_layout()
+    out = os.path.join(CLEANING_VISUALS, 'before_after_columns.png')
+    plt.savefig(out, dpi=150, bbox_inches='tight')
+    plt.close()
+    return out
+
+
 def generate_all_cleaning_charts() -> dict:
     """Generate all cleaning-stage charts."""
     return {
         'missing_values':       generate_missing_values_chart(),
         'readmission_classes':  generate_readmission_class_chart(),
         'before_after':         generate_before_after_chart(),
+        'before_after_columns': generate_before_after_columns_chart(),
     }
 
 
@@ -358,10 +489,17 @@ def generate_all_cleaning_charts() -> dict:
 
 # Exact feature columns used by the model
 FEATURE_COLS = [
+    # Demographics
     'age_numeric',
     'gender_enc',
     'race_enc',
+    # Admission context
     'time_in_hospital',
+    'admission_type_grp',
+    'discharge_grp',
+    'discharge_disposition_id',
+    'admission_source_grp',
+    # Clinical volume
     'num_lab_procedures',
     'num_procedures',
     'num_medications',
@@ -369,8 +507,10 @@ FEATURE_COLS = [
     'number_emergency',
     'number_inpatient',
     'number_diagnoses',
+    # Lab results
     'a1c_result_enc',
     'glu_serum_enc',
+    # Medications
     'insulin_enc',
     'metformin_enc',
     'glipizide_enc',
@@ -380,9 +520,15 @@ FEATURE_COLS = [
     'diabetes_med_enc',
     'num_meds_changed',
     'num_meds_used',
-    'admission_type_grp',
-    'discharge_grp',
-    'admission_source_grp',
+    # Engineered interaction / derived features
+    'total_prior_visits',
+    'has_prior_inpatient',
+    'high_risk_discharge',
+    'insulin_down',
+    'poor_glycaemic_control',
+    'long_stay',
+    'multimorbid',
+    # Diagnosis categories
     'diag_1_cat_enc',
     'diag_2_cat_enc',
     'diag_3_cat_enc',

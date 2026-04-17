@@ -39,7 +39,7 @@
         <h2>Record Count at Each Cleaning Stage</h2>
         <img src="/image/before_after.png" class="img-full" alt="Before/After">
         <div class="insight">
-            Two main reductions: (1) removing 1,652 deceased patients who cannot
+            Two main reductions: (1) removing {{ stats.dirty.deceased_patients }} deceased patients who cannot
             logically be readmitted, and (2) deduplicating to one encounter per patient
             (keeping the first) to prevent information leakage between train/test splits.
         </div>
@@ -52,10 +52,27 @@
         <img src="/image/readmission_classes.png" style="max-width:600px; width:100%;" alt="Class Distribution">
     </div>
     <div class="insight">
-        The dataset has significant <strong>class imbalance</strong>: only ~11% of patients
+        The dataset has significant <strong>class imbalance</strong>: only ~{{ stats.readmission_rate }}% of patients
         are readmitted within 30 days (<em>&lt;30</em>). This is addressed in the model by
         using <em>balanced sample weights</em> during training, so the classifier does not
         simply predict the majority class for every patient.
+    </div>
+</div>
+
+<div class="card">
+    <h2>Before vs After — Column Transformations</h2>
+    <p style="color:#555; font-size:0.9rem; margin-bottom:1rem;">
+        Four examples of how dirty raw columns are transformed into model-ready features.
+        Each panel shows the distribution before (red) and the resulting encoding after (blue).
+    </p>
+    <img src="/image/before_after_columns.png" class="img-full" alt="Before/After Column Transformations">
+    <div class="insight" style="margin-top:1rem;">
+        <ul style="padding-left:1.2rem; line-height:2.1; margin:0;">
+            <li><strong>Age:</strong> 10 string brackets (<code>[60-70)</code> etc.) → numeric midpoint (65). Red bars show raw bracket counts; blue histogram shows the final numeric distribution.</li>
+            <li><strong>A1Cresult:</strong> string values plus 83% missing → ordinal 0–3, with "None" as a meaningful category (patient was not tested).</li>
+            <li><strong>diag_1 (ICD-9):</strong> 700+ unique raw codes reduced to 9 clinically meaningful disease categories, eliminating data sparsity.</li>
+            <li><strong>Insulin:</strong> string (No/Steady/Up/Down) → ordinal 0–3. The line overlay shows early readmission rate per category — "Down" (dose decreased) has the highest readmission risk.</li>
+        </ul>
     </div>
 </div>
 
@@ -104,12 +121,17 @@
             <h3 style="font-size:1rem; margin-bottom:0.6rem;">Engineered Features</h3>
             <ul style="padding-left:1.2rem; line-height:2.1; font-size:0.9rem;">
                 <li><strong>age_numeric</strong> — midpoint of age bracket ([60-70) → 65)</li>
-                <li><strong>diag_1/2/3_cat_enc</strong> — 700+ ICD-9 codes grouped into 9 categories: Diabetes, Circulatory, Respiratory, Digestive, Genitourinary, Musculoskeletal, Injury, Neoplasms, Other</li>
+                <li><strong>diag_1/2/3_cat_enc</strong> — 700+ ICD-9 codes → 9 categories (Diabetes, Circulatory, etc.)</li>
                 <li><strong>num_meds_changed</strong> — count of medications with Up/Down dosage change</li>
-                <li><strong>num_meds_used</strong> — count of medications currently being taken (Steady/Up/Down)</li>
-                <li><strong>discharge_grp</strong> — discharge disposition: Home / Transfer+SNF / Home+Services / Other</li>
-                <li><strong>admission_type_grp</strong> — Emergency / Urgent / Elective / Other</li>
-                <li><strong>admission_source_grp</strong> — Physician referral / Emergency / Transfer / Other</li>
+                <li><strong>num_meds_used</strong> — count of medications currently being taken</li>
+                <li><strong>discharge_grp</strong> — Home / Transfer+SNF / Home+Services / Other</li>
+                <li><strong>admission_type_grp / admission_source_grp</strong> — grouped categorical admission context</li>
+                <li><strong>total_prior_visits</strong> — outpatient + emergency + inpatient visits (prior year)</li>
+                <li><strong>has_prior_inpatient</strong> — binary: any prior inpatient admission</li>
+                <li><strong>high_risk_discharge</strong> — binary: discharge IDs with ≥25% readmission rate</li>
+                <li><strong>insulin_down</strong> — binary: insulin dose was reduced at discharge</li>
+                <li><strong>poor_glycaemic_control</strong> — binary: A1C ≥7% AND on insulin</li>
+                <li><strong>long_stay / multimorbid</strong> — binary: ≥7 days / ≥7 diagnoses</li>
             </ul>
         </div>
         <div>

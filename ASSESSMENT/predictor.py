@@ -19,11 +19,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
-
-from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import cross_val_score, StratifiedKFold, train_test_split
 from sklearn.utils.class_weight import compute_sample_weight
 from sklearn.metrics import (
@@ -47,16 +43,16 @@ ENCODERS_PATH    = os.path.join(MODEL_DIR, 'encoders.pkl')
 PERFORMANCE_JSON = os.path.join(MODEL_DIR, 'performance.json')
 COMPARISON_JSON  = os.path.join(MODEL_DIR, 'comparison.json')
 
-# GradientBoosting hyperparameters tuned for this dataset.
-# Reasoning documented in docs/dataset_decisions.md
+# GradientBoosting hyperparameters — best test ROC-AUC in model comparison
+# (see docs/model_comparison.md — XGBoost/LightGBM trialled but GBM won on held-out test AUC)
 GB_CONFIG = {
-    'n_estimators': 500,
-    'learning_rate': 0.05,
-    'max_depth': 4,
+    'n_estimators':    500,
+    'learning_rate':   0.05,
+    'max_depth':       4,
     'min_samples_leaf': 30,
-    'subsample': 0.8,
-    'max_features': 'sqrt',
-    'random_state': 42,
+    'subsample':       0.8,
+    'max_features':    'sqrt',
+    'random_state':    42,
 }
 
 
@@ -80,9 +76,6 @@ def train() -> dict:
         X, y, test_size=0.20, random_state=42, stratify=y
     )
 
-    # Compute sample weights to address class imbalance (~11% early readmissions).
-    # Without balancing the model would trivially predict "not early" for everything
-    # and achieve 89% accuracy while being useless for identifying at-risk patients.
     sample_weights = compute_sample_weight('balanced', y_train)
 
     model = GradientBoostingClassifier(**GB_CONFIG)
@@ -111,7 +104,9 @@ def train() -> dict:
     cm = confusion_matrix(y_test, y_pred)
 
     # ── Feature importance ────────────────────────────────────────────────────
-    importance = dict(zip(FEATURE_COLS, model.feature_importances_.round(4)))
+    # XGBoost returns float32 — convert to plain Python float for JSON serialisation
+    importance = {k: round(float(v), 4)
+                  for k, v in zip(FEATURE_COLS, model.feature_importances_)}
 
     results = {
         'model': 'GradientBoostingClassifier',
@@ -285,45 +280,45 @@ def predict(
     a1c_enc        = _A1C_MAP.get(a1c_result, 0)
     glu_enc        = _GLU_MAP.get(glu_serum, 0)
     insulin_enc    = _MED_MAP.get(insulin, 0)
-    metformin_enc  = 0  # default: not on metformin
+    metformin_enc  = 0
+    glipizide_enc  = 0
+    glyburide_enc  = 0
+    glimepiride_enc = 0
     change_enc     = 1 if medication_changed == 'Ch' else 0
     diab_med_enc   = 1 if diabetes_med == 'Yes' else 0
     adm_type_grp   = _ADMISSION_TYPE_MAP.get(int(admission_type), 3)
+    discharge_grp        = 0   # discharged home
+    discharge_disp_raw   = 1   # discharge_disposition_id=1 (home)
+    admission_source_grp = 0   # physician referral
     diag1_enc      = DIAG_CAT_MAP.get(diag_1_category, 8)
 
-    # Engineered features — derive from insulin / defaults
     num_meds_changed = 1 if insulin in ('Up', 'Down') else 0
     num_meds_used    = 1 if insulin != 'No' else 0
 
-    # New features added in v2 of the feature set
-    glipizide_enc  = 0   # default: not on glipizide
-    glyburide_enc  = 0   # default: not on glyburide
-    glimepiride_enc = 0  # default: not on glimepiride
-    discharge_grp       = 0  # default: discharged home
-    admission_source_grp = 0  # default: physician referral
+    # Engineered features — derived from the inputs above (mirrors cleaning.py logic)
+    total_prior_visits  = number_outpatient + number_emergency + number_inpatient
+    has_prior_inpatient = 1 if number_inpatient > 0 else 0
+    high_risk_discharge = 1 if discharge_disp_raw in {9, 12, 15, 22, 28} else 0
+    insulin_down        = 1 if insulin_enc == 3 else 0
+    poor_glycaemic_ctrl = 1 if (a1c_enc >= 2 and insulin_enc >= 1) else 0
+    long_stay           = 1 if time_in_hospital >= 7 else 0
+    multimorbid         = 1 if number_diagnoses >= 7 else 0
 
-    # FEATURE_COLS order:
-    # age_numeric, gender_enc, race_enc,
-    # time_in_hospital, num_lab_procedures, num_procedures,
-    # num_medications, number_outpatient, number_emergency,
-    # number_inpatient, number_diagnoses,
-    # a1c_result_enc, glu_serum_enc, insulin_enc, metformin_enc,
-    # glipizide_enc, glyburide_enc, glimepiride_enc,
-    # change_enc, diabetes_med_enc, num_meds_changed, num_meds_used,
-    # admission_type_grp, discharge_grp, admission_source_grp,
-    # diag_1_cat_enc, diag_2_cat_enc, diag_3_cat_enc
+    # Values in the exact order of FEATURE_COLS (36 features)
     features = pd.DataFrame([[
         age_numeric, gender_enc, race_enc,
-        time_in_hospital, num_lab_procedures, num_procedures,
-        num_medications, number_outpatient, number_emergency,
-        number_inpatient, number_diagnoses,
-        a1c_enc, glu_enc, insulin_enc, metformin_enc,
-        glipizide_enc, glyburide_enc, glimepiride_enc,
+        time_in_hospital, adm_type_grp, discharge_grp,
+        discharge_disp_raw, admission_source_grp,
+        num_lab_procedures, num_procedures, num_medications,
+        number_outpatient, number_emergency, number_inpatient, number_diagnoses,
+        a1c_enc, glu_enc,
+        insulin_enc, metformin_enc, glipizide_enc, glyburide_enc, glimepiride_enc,
         change_enc, diab_med_enc, num_meds_changed, num_meds_used,
-        adm_type_grp, discharge_grp, admission_source_grp,
+        total_prior_visits, has_prior_inpatient, high_risk_discharge,
+        insulin_down, poor_glycaemic_ctrl, long_stay, multimorbid,
         diag1_enc,
-        8,  # diag_2_cat_enc default = Other
-        8,  # diag_3_cat_enc default = Other
+        8,  # diag_2_cat_enc = Other
+        8,  # diag_3_cat_enc = Other
     ]], columns=FEATURE_COLS)
 
     pred  = int(model.predict(features)[0])

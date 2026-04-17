@@ -4,7 +4,7 @@
 
 <h1>Model Performance Dashboard</h1>
 <p class="subtitle">
-    Gradient Boosting Classifier — early readmission prediction (&lt;30 days).
+    {{ stats.best_model }} — early readmission prediction (&lt;30 days).
     Trained on {{ "{:,}".format(stats.n_train | int) }} samples, evaluated on {{ "{:,}".format(stats.n_test | int) }}.
 </p>
 
@@ -21,9 +21,12 @@
         <div class="val">{{ stats.cv_roc_mean }}%</div>
         <div class="lbl">CV ROC-AUC (5-fold)</div>
     </div>
-    <div class="stat-box">
+    <div class="stat-box" style="position:relative;">
         <div class="val">{{ stats.avg_precision }}%</div>
         <div class="lbl">Avg Precision</div>
+        <div style="font-size:0.72rem; color:#888; margin-top:0.3rem;">
+            random baseline ~{{ stats.minority_pct }}%
+        </div>
     </div>
     <div class="stat-box">
         <div class="val {% if stats.overfitting_gap | abs > 10 %}style="color:#e74c3c"{% endif %}">
@@ -31,6 +34,14 @@
         </div>
         <div class="lbl">Overfit Gap</div>
     </div>
+</div>
+
+<div class="insight" style="margin-bottom:1.5rem;">
+    <strong>Why is Avg Precision low?</strong>
+    With only {{ stats.minority_pct }}% of patients being early readmissions, a random classifier would score ~{{ stats.minority_pct }}% average precision.
+    At {{ stats.avg_precision }}%, this model is roughly {{ (stats.avg_precision / stats.minority_pct) | round(1) }}× better than random —
+    but precision will always be limited by the class imbalance. The model is tuned for <strong>recall</strong> (catch as many high-risk patients as possible),
+    accepting more false positives. In clinical practice, an unnecessary follow-up call costs far less than a missed early readmission.
 </div>
 
 <div class="img-grid">
@@ -81,8 +92,8 @@
     </div>
     <div class="insight" style="margin-top:1rem;">
         Due to class imbalance, accuracy is a misleading metric here. A model that always
-        predicts "Not Early" would achieve ~89% accuracy but 0% recall for the early readmission
-        class. <strong>ROC-AUC</strong> is the primary metric — at {{ stats.roc_auc }}%, the model
+        predicts "Not Early" would achieve ~{{ stats.majority_pct }}% accuracy (matching the {{ stats.majority_pct }}% majority class) but
+        0% recall for the early readmission class. <strong>ROC-AUC</strong> is the primary metric — at {{ stats.roc_auc }}%, the model
         substantially outperforms the 50% random baseline.
     </div>
 </div>
@@ -150,7 +161,8 @@
         <div class="insight">
             The small gap between training and test accuracy confirms the model is
             not memorising the training data. Balanced sample weights shift the
-            decision boundary toward identifying early readmissions.
+            decision boundary toward identifying early readmissions rather than
+            defaulting to the {{ stats.majority_pct }}% majority class.
         </div>
     </div>
     <div class="card">
@@ -158,7 +170,7 @@
         <img src="/image/perf_per_class.png" class="img-full" alt="Per Class Metrics">
         <div class="insight">
             The "Early (&lt;30d)" class has lower precision and recall than the majority class —
-            this is expected with 11% positive rate even after balancing. Recall for the
+            this is expected with {{ stats.minority_pct }}% positive rate even after balancing. Recall for the
             minority class is the most important clinical metric.
         </div>
     </div>
@@ -170,31 +182,21 @@
         <table style="border-collapse:collapse; font-size:0.88rem; width:auto;">
             <tr style="border-bottom:1px solid #eee;">
                 <td style="padding:0.4rem 1rem; font-weight:600; color:#555;">Algorithm</td>
-                <td style="padding:0.4rem 1rem;">GradientBoostingClassifier (sklearn)</td>
+                <td style="padding:0.4rem 1rem;">{{ stats.best_model }} (sklearn)</td>
             </tr>
-            <tr style="border-bottom:1px solid #eee; background:#f9f9f9;">
-                <td style="padding:0.4rem 1rem; font-weight:600; color:#555;">n_estimators</td>
-                <td style="padding:0.4rem 1rem;">500 trees</td>
+            {% for row in stats.config_rows %}
+            <tr style="border-bottom:1px solid #eee;{% if loop.index is odd %}background:#f9f9f9;{% endif %}">
+                <td style="padding:0.4rem 1rem; font-weight:600; color:#555;">{{ row.param }}</td>
+                <td style="padding:0.4rem 1rem;">{{ row.value }}{% if row.desc %} — {{ row.desc }}{% endif %}</td>
             </tr>
+            {% endfor %}
             <tr style="border-bottom:1px solid #eee;">
-                <td style="padding:0.4rem 1rem; font-weight:600; color:#555;">learning_rate</td>
-                <td style="padding:0.4rem 1rem;">0.05 (slow learning for better generalisation)</td>
-            </tr>
-            <tr style="border-bottom:1px solid #eee; background:#f9f9f9;">
-                <td style="padding:0.4rem 1rem; font-weight:600; color:#555;">max_depth</td>
-                <td style="padding:0.4rem 1rem;">4 (limits tree complexity)</td>
-            </tr>
-            <tr style="border-bottom:1px solid #eee;">
-                <td style="padding:0.4rem 1rem; font-weight:600; color:#555;">subsample</td>
-                <td style="padding:0.4rem 1rem;">0.8 (stochastic boosting, reduces variance)</td>
-            </tr>
-            <tr style="border-bottom:1px solid #eee; background:#f9f9f9;">
                 <td style="padding:0.4rem 1rem; font-weight:600; color:#555;">Class imbalance</td>
-                <td style="padding:0.4rem 1rem;">Balanced sample weights via compute_sample_weight('balanced')</td>
+                <td style="padding:0.4rem 1rem;">compute_sample_weight('balanced') — up-weights the {{ stats.minority_pct }}% minority class {{ stats.minority_weight }}×</td>
             </tr>
             <tr>
                 <td style="padding:0.4rem 1rem; font-weight:600; color:#555;">Train/Test split</td>
-                <td style="padding:0.4rem 1rem;">80% / 20% stratified</td>
+                <td style="padding:0.4rem 1rem;">80% / 20% stratified ({{ "{:,}".format(stats.n_train | int) }} / {{ "{:,}".format(stats.n_test | int) }} samples)</td>
             </tr>
         </table>
     </div>

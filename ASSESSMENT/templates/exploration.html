@@ -3,16 +3,16 @@
 {% block content %}
 
 <h1>Data Exploration</h1>
-<p class="subtitle">Patterns and trends in the cleaned Diabetes 130-US Hospitals dataset.</p>
+<p class="subtitle">Patterns, trends, and cluster analysis on the cleaned Diabetes 130-US Hospitals dataset.</p>
 
 <div class="img-grid">
     <div class="card">
         <h2>Readmission Class Distribution</h2>
         <img src="/image/diagnosis_distribution.png" class="img-full" alt="Readmission Distribution">
         <div class="insight">
-            The dataset is heavily imbalanced: only ~11% of encounters result in early
+            The dataset is heavily imbalanced: only ~{{ readmission_rate }}% of encounters result in early
             readmission (&lt;30 days). This imbalance is handled in the model via
-            balanced sample weighting.
+            balanced sample weights (<code>compute_sample_weight('balanced')</code>).
         </div>
     </div>
 
@@ -21,9 +21,8 @@
         <img src="/image/correlation_heatmap.png" class="img-full" alt="Correlation Heatmap">
         <div class="insight">
             <strong>number_inpatient</strong> has the strongest positive correlation with
-            early readmission — patients with more previous inpatient visits are significantly
-            more likely to be readmitted early. Number of medications and diagnoses also
-            show moderate positive correlation.
+            early readmission. Number of medications and diagnoses also show moderate positive
+            correlation — consistent with the model's top feature importances.
         </div>
     </div>
 </div>
@@ -34,8 +33,7 @@
         <img src="/image/age_readmission.png" class="img-full" alt="Age vs Readmission">
         <div class="insight">
             Younger patients (under 30) and older patients (70+) show slightly elevated
-            readmission rates. Middle-aged patients (40–60) form the largest encounter
-            group but do not have disproportionately high readmission rates.
+            readmission rates. The age midpoint encoding captures this non-linear relationship.
         </div>
     </div>
 
@@ -45,7 +43,7 @@
         <div class="insight">
             Injury and Circulatory disease patients have the highest early readmission rates,
             while Musculoskeletal and Digestive disease patients are least likely to be
-            readmitted early. This information is captured by the ICD-9 category feature.
+            readmitted early.
         </div>
     </div>
 </div>
@@ -56,8 +54,8 @@
         <img src="/image/medication_readmission.png" class="img-full" alt="Medication vs Readmission">
         <div class="insight">
             Patients whose insulin dose was <strong>reduced (Down)</strong> during admission have
-            a notably higher early readmission rate — suggesting inadequate glycaemic management.
-            The direction of dose change (not just whether it was prescribed) is a meaningful signal.
+            a notably higher early readmission rate — the engineered <code>insulin_down</code>
+            binary flag captures this directly.
         </div>
     </div>
 
@@ -65,9 +63,9 @@
         <h2>Time in Hospital by Readmission</h2>
         <img src="/image/time_in_hospital.png" class="img-full" alt="Time in Hospital">
         <div class="insight">
-            Longer hospital stays are associated with higher early readmission probability,
-            which may reflect greater underlying disease complexity. Shorter stays (1–2 days)
-            also show elevated rates — possibly premature discharge.
+            Longer hospital stays correlate with higher readmission probability, reflecting
+            greater underlying complexity. Short stays (1–2 days) also show elevated rates —
+            possibly indicating premature discharge.
         </div>
     </div>
 </div>
@@ -76,10 +74,228 @@
     <h2>Readmission Rate by Race</h2>
     <img src="/image/race_readmission.png" class="img-full" alt="Race vs Readmission">
     <div class="insight">
-        There is limited variation in readmission rates across racial groups in this dataset.
-        Any differences observed should be interpreted cautiously given the imbalanced
-        and potentially incomplete racial classification in administrative records.
+        Limited variation across racial groups. Any differences should be interpreted
+        cautiously given potentially incomplete racial classification in administrative records.
     </div>
 </div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     K-MEANS CLUSTERING
+     ════════════════════════════════════════════════════════════════════════ -->
+
+<h2 style="margin:2rem 0 0.5rem; font-size:1.5rem; color:#2c3e50;">
+    K-Means Patient Clustering
+</h2>
+<p class="subtitle" style="margin-bottom:1rem;">
+    Explore natural patient groupings using K-Means. Adjust the number of clusters and
+    axis features — charts update live without a page reload.
+</p>
+
+<div class="card">
+    <h2>Elbow &amp; Silhouette Analysis</h2>
+    <p style="font-size:0.88rem; color:#555; margin-bottom:0.8rem;">
+        The elbow chart shows where adding more clusters gives diminishing returns on
+        inertia reduction. The silhouette score peaks at the most cohesive k.
+    </p>
+    <div id="elbow-loading" style="text-align:center; padding:2rem; color:#888;">Loading elbow chart…</div>
+    <img id="elbow-img" src="" class="img-full" alt="Elbow Chart" style="display:none;">
+    <div class="insight" style="margin-top:0.8rem;">
+        K-Means uses <strong>14 numeric clinical features</strong> (age, time in hospital,
+        lab procedures, medications, prior visits, etc.), standardised to zero mean / unit
+        variance before clustering. The scatter and PCA plots show the chosen axes; clustering
+        itself uses all 14 features. For the sharpest visual separation use
+        <em>Total Prior Visits</em> (x) vs <em>Medications Used</em> (y) at k=3.
+    </div>
+</div>
+
+<div class="card" id="cluster-controls">
+    <h2>Interactive Cluster Explorer</h2>
+
+    <!-- ── Row 1: clustering parameter (affects score + clusters) ── -->
+    <div style="background:#eaf7ee; border:1px solid #a9dfbf; border-radius:6px; padding:0.8rem 1rem; margin-bottom:0.8rem;">
+        <div style="font-size:0.75rem; font-weight:700; color:#1a5c38; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.5rem;">
+            Clustering parameter — changes clusters &amp; silhouette score
+        </div>
+        <label style="font-size:0.85rem; font-weight:600; color:#333; display:block; margin-bottom:0.3rem;">
+            Number of clusters (k): <span id="k-val" style="color:#1a5c38; font-weight:700;">3</span>
+        </label>
+        <input type="range" id="k-slider" min="2" max="8" value="3"
+               style="width:220px; accent-color:#1a5c38;">
+    </div>
+
+    <!-- ── Row 2: visualisation axes (scatter only, no effect on score) ── -->
+    <div style="background:#f4f4f4; border:1px solid #ddd; border-radius:6px; padding:0.8rem 1rem; margin-bottom:1rem;">
+        <div style="font-size:0.75rem; font-weight:700; color:#666; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.5rem;">
+            Scatter plot axes — visualisation only, does not affect clustering or silhouette score
+        </div>
+        <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:end;">
+            <div>
+                <label style="font-size:0.85rem; font-weight:600; color:#555; display:block; margin-bottom:0.3rem;">X axis</label>
+                <select id="x-feature" style="padding:0.45rem 0.7rem; border:1px solid #ccc; border-radius:5px;">
+                    <option value="age_numeric">Age</option>
+                    <option value="time_in_hospital" selected>Time in Hospital</option>
+                    <option value="num_medications">Number of Medications</option>
+                    <option value="num_lab_procedures">Lab Procedures</option>
+                    <option value="number_inpatient">Prior Inpatient Visits</option>
+                    <option value="number_diagnoses">Number of Diagnoses</option>
+                    <option value="total_prior_visits">Total Prior Visits</option>
+                    <option value="num_meds_used">Medications Used</option>
+                </select>
+            </div>
+            <div>
+                <label style="font-size:0.85rem; font-weight:600; color:#555; display:block; margin-bottom:0.3rem;">Y axis</label>
+                <select id="y-feature" style="padding:0.45rem 0.7rem; border:1px solid #ccc; border-radius:5px;">
+                    <option value="age_numeric" selected>Age</option>
+                    <option value="time_in_hospital">Time in Hospital</option>
+                    <option value="num_medications">Number of Medications</option>
+                    <option value="num_lab_procedures">Lab Procedures</option>
+                    <option value="number_inpatient">Prior Inpatient Visits</option>
+                    <option value="number_diagnoses">Number of Diagnoses</option>
+                    <option value="total_prior_visits">Total Prior Visits</option>
+                    <option value="num_meds_used">Medications Used</option>
+                </select>
+            </div>
+            <button id="run-btn" onclick="runClustering()"
+                    style="padding:0.5rem 1.2rem; background:#1a5c38; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:0.95rem;">
+                Update Clusters
+            </button>
+        </div>
+        <div style="font-size:0.78rem; color:#888; margin-top:0.5rem;">
+            Tip: <strong>Total Prior Visits (x)</strong> vs <strong>Medications Used (y)</strong> shows the sharpest visual separation between groups.
+        </div>
+    </div>
+
+    <div id="cluster-loading" style="display:none; text-align:center; padding:2rem; color:#888;">
+        Running K-Means… this may take a few seconds.
+    </div>
+
+    <div id="cluster-results" style="display:none;">
+        <div class="img-grid" style="margin-bottom:1rem;">
+            <div>
+                <p style="font-weight:600; color:#34495e; margin-bottom:0.4rem;">Feature Scatter</p>
+                <img id="scatter-img" src="" class="img-full" alt="Cluster Scatter">
+            </div>
+            <div>
+                <p style="font-weight:600; color:#34495e; margin-bottom:0.4rem;">PCA 2-D Projection</p>
+                <img id="pca-img" src="" class="img-full" alt="PCA Projection">
+            </div>
+        </div>
+
+        <div style="display:flex; gap:1rem; align-items:center; margin-bottom:1rem; flex-wrap:wrap;">
+            <div class="stat-box" style="flex:0 0 auto; min-width:160px;">
+                <div class="val" id="sil-val" style="font-size:1.5rem;">—</div>
+                <div class="lbl">Silhouette Score</div>
+            </div>
+            <div class="insight" style="flex:1; margin:0;">
+                <strong>Silhouette score</strong> ranges from −1 to +1. Scores above 0.3 indicate
+                tight, well-separated clusters; scores near 0 mean clusters overlap.
+                Scores of 0.11–0.23 here are expected and not a failure — clustering runs on
+                all 14 clinical features simultaneously, most of which are continuous with no
+                sharp natural boundary. The score only changes when you adjust <strong>k</strong>,
+                not the scatter axes (axes only control which two features are visualised).
+                Clusters are sorted by early readmission rate — the highest-risk group appears first.
+            </div>
+        </div>
+
+        <div style="overflow-x:auto;">
+            <table id="cluster-table" style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+                <thead>
+                    <tr style="background:#2c3e50; color:#fff;">
+                        <th style="padding:0.6rem 1rem; text-align:left;">Cluster</th>
+                        <th style="padding:0.6rem 1rem; text-align:right;">Patients</th>
+                        <th style="padding:0.6rem 1rem; text-align:right;">% of Total</th>
+                        <th style="padding:0.6rem 1rem; text-align:right;">Readmission Rate</th>
+                        <th style="padding:0.6rem 1rem; text-align:left;">Risk Level</th>
+                    </tr>
+                </thead>
+                <tbody id="cluster-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="insight" style="margin-bottom:1.5rem;">
+    <strong>Note:</strong> K-Means clusters are derived from clinical numeric features only —
+    the model does not use the readmission label during clustering. Readmission rates per
+    cluster are computed <em>after</em> clustering and show how well the unsupervised grouping
+    aligns with the supervised outcome.
+</div>
+
+<script>
+const BASE_RATE = {{ readmission_rate }};
+
+// Load elbow chart on page load
+fetch('/api/cluster/elbow')
+    .then(r => r.json())
+    .then(data => {
+        document.getElementById('elbow-loading').style.display = 'none';
+        const img = document.getElementById('elbow-img');
+        img.src = 'data:image/png;base64,' + data.elbow;
+        img.style.display = 'block';
+    })
+    .catch(() => {
+        document.getElementById('elbow-loading').textContent = 'Could not load elbow chart.';
+    });
+
+// Sync slider label
+document.getElementById('k-slider').addEventListener('input', function() {
+    document.getElementById('k-val').textContent = this.value;
+});
+
+function runClustering() {
+    const k = document.getElementById('k-slider').value;
+    const x = document.getElementById('x-feature').value;
+    const y = document.getElementById('y-feature').value;
+
+    document.getElementById('cluster-loading').style.display = 'block';
+    document.getElementById('cluster-results').style.display = 'none';
+    document.getElementById('run-btn').disabled = true;
+
+    fetch(`/api/cluster?k=${k}&x=${x}&y=${y}`)
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('scatter-img').src = 'data:image/png;base64,' + data.scatter;
+            document.getElementById('pca-img').src    = 'data:image/png;base64,' + data.pca;
+            document.getElementById('sil-val').textContent = data.metrics.silhouette;
+
+            const tbody = document.getElementById('cluster-tbody');
+            tbody.innerHTML = '';
+            data.metrics.cluster_stats.forEach((s, i) => {
+                const risk = s.readmission_rate >= BASE_RATE * 1.5 ? 'High'
+                           : s.readmission_rate >= BASE_RATE        ? 'Elevated'
+                           :                                          'Low';
+                const colour = risk === 'High' ? '#e74c3c'
+                             : risk === 'Elevated' ? '#e67e22' : '#27ae60';
+                tbody.innerHTML += `
+                    <tr style="border-bottom:1px solid #eee;${i%2===1?'background:#f9f9f9;':''}">
+                        <td style="padding:0.6rem 1rem; font-weight:600;">Cluster ${s.cluster}</td>
+                        <td style="padding:0.6rem 1rem; text-align:right;">${s.n.toLocaleString()}</td>
+                        <td style="padding:0.6rem 1rem; text-align:right;">${s.pct_of_total}%</td>
+                        <td style="padding:0.6rem 1rem; text-align:right; font-weight:700; color:${colour};">
+                            ${s.readmission_rate}%
+                        </td>
+                        <td style="padding:0.6rem 1rem;">
+                            <span style="background:${colour}20; color:${colour}; padding:0.2rem 0.6rem;
+                                         border-radius:12px; font-size:0.8rem; font-weight:600;">
+                                ${risk}
+                            </span>
+                        </td>
+                    </tr>`;
+            });
+
+            document.getElementById('cluster-loading').style.display = 'none';
+            document.getElementById('cluster-results').style.display = 'block';
+        })
+        .catch(err => {
+            document.getElementById('cluster-loading').textContent = 'Error: ' + err;
+        })
+        .finally(() => {
+            document.getElementById('run-btn').disabled = false;
+        });
+}
+
+// Run on first load with defaults
+runClustering();
+</script>
 
 {% endblock %}

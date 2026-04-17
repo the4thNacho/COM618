@@ -160,7 +160,8 @@ def cleaning():
 def exploration():
     from exploration import generate_all
     generate_all()
-    return render_template('exploration.html')
+    stats = get_cleaning_stats()
+    return render_template('exploration.html', readmission_rate=stats['readmission_rate'])
 
 
 @app.route('/model', methods=['GET', 'POST'])
@@ -198,9 +199,15 @@ def model():
         except (ValueError, KeyError) as e:
             result = {'error': str(e)}
 
+    cm = metrics.get('confusion_matrix', [[0, 0], [0, 0]])
+    _total = sum(cm[0]) + sum(cm[1])
+    _pos   = sum(cm[1])
+    minority_pct = round(_pos / _total * 100, 1) if _total else 0
+
     return render_template('model.html',
                            metrics=metrics, result=result, form=form,
-                           age_ranges=age_ranges, diag_cats=diag_cats)
+                           age_ranges=age_ranges, diag_cats=diag_cats,
+                           minority_pct=minority_pct)
 
 
 @app.route('/performance')
@@ -210,25 +217,59 @@ def performance():
     perf = load_performance()
     import numpy as np
 
+    # Derive majority/minority class rates from the confusion matrix so nothing
+    # is hardcoded — these will update automatically if the model is retrained.
+    cm = perf.get('confusion_matrix', [[0, 0], [0, 0]])
+    total_test  = sum(cm[0]) + sum(cm[1])
+    n_negative  = sum(cm[0])   # actual Not Early
+    n_positive  = sum(cm[1])   # actual Early
+    majority_pct  = round(n_negative / total_test * 100, 1) if total_test else 0
+    minority_pct  = round(n_positive / total_test * 100, 1) if total_test else 0
+    minority_weight = round(n_negative / n_positive, 1) if n_positive else 0
+
+    cv_roc = perf.get('cv_roc', [0])
+    cv_acc = perf.get('cv_acc', [0])
+
+    # Build human-readable rows for the model config table from the stored config dict.
+    # Descriptions are generic enough to apply to any GBM-family model.
+    _cfg = perf.get('model_config', {})
+    config_rows = []
+    _desc = {
+        'n_estimators':     'number of sequential trees',
+        'learning_rate':    'step size per tree — smaller = less overfitting',
+        'max_depth':        'max tree depth — limits interaction complexity',
+        'min_samples_leaf': 'min patients per leaf — prevents noisy splits',
+        'subsample':        'fraction of training rows used per tree',
+        'max_features':     'feature subsampling at each split',
+        'random_state':     'random seed for reproducibility',
+    }
+    for k, v in _cfg.items():
+        config_rows.append({'param': k, 'value': v, 'desc': _desc.get(k, '')})
+
     stats = {
-        'test_acc':        round(perf.get('test_acc', 0) * 100, 1),
-        'train_acc':       round(perf.get('train_acc', 0) * 100, 1),
-        'overfitting_gap': perf.get('overfitting_gap', 0),
-        'roc_auc':         round(perf.get('roc_auc', 0) * 100, 1),
-        'cv_acc_mean':     round(float(np.mean(perf.get('cv_acc', [0]))) * 100, 1),
-        'cv_roc_mean':     round(float(np.mean(perf.get('cv_roc', [0]))) * 100, 1),
-        'loo_acc':         round(perf.get('loo_acc', 0) * 100, 1),
-        'loo_roc':         round(perf.get('loo_roc', 0) * 100, 1),
-        'mean_confidence': perf.get('mean_confidence', 0),
-        'per_class':       perf.get('per_class', {}),
-        'class_names':     perf.get('class_names', []),
-        'overfit_warning': abs(perf.get('overfitting_gap', 0)) > 10,
-        'best_model':      'GradientBoostingClassifier',
-        'comparison':      {},
-        'training_mode':   perf.get('training_mode', 'real_data_only'),
-        'n_train':         perf.get('n_train', 0),
-        'n_test':          perf.get('n_test', 0),
-        'avg_precision':   round(perf.get('test_performance', {}).get('avg_precision', 0) * 100, 1),
+        'test_acc':          round(perf.get('test_acc', 0) * 100, 1),
+        'train_acc':         round(perf.get('train_acc', 0) * 100, 1),
+        'overfitting_gap':   perf.get('overfitting_gap', 0),
+        'roc_auc':           round(perf.get('roc_auc', 0) * 100, 1),
+        'cv_acc_mean':       round(float(np.mean(cv_acc)) * 100, 1),
+        'cv_acc_std':        round(float(np.std(cv_acc))  * 100, 2),
+        'cv_roc_mean':       round(float(np.mean(cv_roc)) * 100, 1),
+        'cv_roc_std':        round(float(np.std(cv_roc))  * 100, 2),
+        'mean_confidence':   perf.get('mean_confidence', 0),
+        'per_class':         perf.get('per_class', {}),
+        'class_names':       perf.get('class_names', []),
+        'overfit_warning':   abs(perf.get('overfitting_gap', 0)) > 10,
+        'best_model':        perf.get('model', 'GradientBoostingClassifier'),
+        'training_mode':     perf.get('training_mode', 'real_data_only'),
+        'n_train':           perf.get('n_train', 0),
+        'n_test':            perf.get('n_test', 0),
+        'avg_precision':     round(perf.get('test_performance', {}).get('avg_precision', 0) * 100, 1),
+        # Derived class-balance stats — all from confusion matrix, nothing hardcoded
+        'majority_pct':      majority_pct,
+        'minority_pct':      minority_pct,
+        'minority_weight':   minority_weight,
+        # Model config as a list of rows for the config table
+        'config_rows':       config_rows,
     }
     return render_template('performance.html', stats=stats)
 
@@ -240,6 +281,28 @@ def image(name):
         if os.path.isfile(path):
             return send_file(path, mimetype='image/png')
     return f'Image not found: {name}', 404
+
+
+@app.route('/api/cluster/elbow')
+def api_cluster_elbow():
+    from clustering import generate_elbow_chart
+    b64 = generate_elbow_chart()
+    return jsonify({'elbow': b64})
+
+
+@app.route('/api/cluster')
+def api_cluster():
+    from clustering import generate_cluster_scatter, CLUSTER_DISPLAY_FEATURES
+    k = max(2, min(8, int(request.args.get('k', 3))))
+    valid = {f for f, _ in CLUSTER_DISPLAY_FEATURES}
+    x = request.args.get('x', 'age_numeric')
+    y = request.args.get('y', 'time_in_hospital')
+    if x not in valid:
+        x = 'age_numeric'
+    if y not in valid:
+        y = 'time_in_hospital'
+    scatter_b64, pca_b64, metrics = generate_cluster_scatter(k, x, y)
+    return jsonify({'scatter': scatter_b64, 'pca': pca_b64, 'metrics': metrics})
 
 
 if __name__ == '__main__':
