@@ -393,12 +393,14 @@ def generate_before_after_columns_chart() -> str:
     # ── Panel 1: Age ────────────────────────────────────────────────────────────
     ax = axes[0, 0]
     age_order = list(AGE_MIDPOINTS.keys())
+    age_midpoints = list(AGE_MIDPOINTS.values())
     age_counts = raw['age'].value_counts().reindex(age_order, fill_value=0)
     ax2 = ax.twinx()
-    ax.bar(range(len(age_order)), age_counts.values, color='#e74c3c', alpha=0.7, label='Raw (string)')
+    ax.bar(age_midpoints, age_counts.values, width=8, color='#e74c3c', alpha=0.7, label='Raw (string)')
     ax2.hist(cleaned['age_numeric'], bins=10, color='#2980b9', alpha=0.6, label='Clean (numeric)')
-    ax.set_xticks(range(len(age_order)))
-    ax.set_xticklabels(age_order, rotation=90, ha='right', fontsize=7)
+    ax.set_xticks(age_midpoints)
+    ax.set_xticklabels(age_order, rotation=45, ha='right', fontsize=7)
+    ax.set_xlabel('Age bracket', fontsize=9)
     ax.set_ylabel('Count (raw)', color='#e74c3c')
     ax2.set_ylabel('Count (cleaned)', color='#2980b9')
     ax.set_title('Age: "[60-70)" → 65 (midpoint)', fontsize=11)
