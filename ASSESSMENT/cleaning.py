@@ -398,7 +398,7 @@ def generate_before_after_columns_chart() -> str:
     ax.bar(range(len(age_order)), age_counts.values, color='#e74c3c', alpha=0.7, label='Raw (string)')
     ax2.hist(cleaned['age_numeric'], bins=10, color='#2980b9', alpha=0.6, label='Clean (numeric)')
     ax.set_xticks(range(len(age_order)))
-    ax.set_xticklabels(age_order, rotation=45, ha='right', fontsize=8)
+    ax.set_xticklabels(age_order, rotation=90, ha='right', fontsize=7)
     ax.set_ylabel('Count (raw)', color='#e74c3c')
     ax2.set_ylabel('Count (cleaned)', color='#2980b9')
     ax.set_title('Age: "[60-70)" → 65 (midpoint)', fontsize=11)
