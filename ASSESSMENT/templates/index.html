@@ -67,6 +67,40 @@
 </div>
 
 <div class="card">
+    <h2>ICD-9 Diagnosis Categories</h2>
+    <p style="margin-bottom:0.8rem">The 716 raw ICD-9 diagnosis codes in <code>diag_1/2/3</code> are grouped into 9 broad categories for modelling.</p>
+    <table style="width:100%; border-collapse:collapse; font-size:0.9rem">
+        <thead>
+            <tr style="background:var(--accent,#1a7a4a); color:#fff; text-align:left">
+                <th style="padding:6px 10px">Category</th>
+                <th style="padding:6px 10px">ICD-9 Code Range(s)</th>
+                <th style="padding:6px 10px">Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set rows = [
+                ('Diabetes',        '250–250.9',             'Diabetes mellitus'),
+                ('Circulatory',     '390–459, 785',          'Heart disease, hypertension, stroke, vascular'),
+                ('Respiratory',     '460–519, 786',          'Pneumonia, COPD, asthma, other lung disease'),
+                ('Digestive',       '520–579, 787',          'Ulcers, liver disease, gastro-intestinal disorders'),
+                ('Genitourinary',   '580–629, 788',          'Kidney disease, UTI, renal failure'),
+                ('Musculoskeletal', '710–739',               'Arthritis, fractures, connective tissue disease'),
+                ('Injury',          '800–999',               'Trauma, poisoning, complications of care'),
+                ('Neoplasms',       '140–239',               'Benign and malignant tumours'),
+                ('Other',           'V-codes, E-codes, remainder', 'External causes, supplementary factors, unclassified'),
+            ] %}
+            {% for cat, codes, desc in rows %}
+            <tr style="border-bottom:1px solid #ddd; {% if loop.index is odd %}background:#f9f9f9{% endif %}">
+                <td style="padding:6px 10px"><strong>{{ cat }}</strong></td>
+                <td style="padding:6px 10px; font-family:monospace">{{ codes }}</td>
+                <td style="padding:6px 10px">{{ desc }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
     <h2>Why Early Readmission?</h2>
     <p>
         In the US, hospitals are penalised under the <em>Hospital Readmissions Reduction Programme</em> (HRRP)
