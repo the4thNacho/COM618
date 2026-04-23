@@ -97,8 +97,8 @@ def train() -> dict:
 
     # ── Cross-validation ─────────────────────────────────────────────────────
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    cv_acc = cross_val_score(model, X_train, y_train, cv=cv, scoring='accuracy', n_jobs=-1)
-    cv_roc = cross_val_score(model, X_train, y_train, cv=cv, scoring='roc_auc', n_jobs=-1)
+    cv_acc = cross_val_score(model, X_train, y_train, cv=cv, scoring='accuracy', n_jobs=1)
+    cv_roc = cross_val_score(model, X_train, y_train, cv=cv, scoring='roc_auc', n_jobs=1)
 
     # ── Confusion matrix data ─────────────────────────────────────────────────
     cm = confusion_matrix(y_test, y_pred)
