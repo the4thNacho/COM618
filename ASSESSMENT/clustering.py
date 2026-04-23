@@ -25,14 +25,21 @@ from sklearn.preprocessing import StandardScaler
 
 from cleaning import load_and_clean
 
-# Features used as inputs to the K-means algorithm (all numeric, clinically meaningful)
+# Features used as inputs to the K-means algorithm (all numeric, clinically meaningful).
+# Excluded: number_outpatient (~98% zeros), number_emergency (~98% zeros),
+# glu_serum_enc (~92% zeros) — near-zero variance even after scaling, adds noise.
 CLUSTER_CORE_FEATURES = [
     'age_numeric', 'time_in_hospital', 'num_lab_procedures',
-    'num_medications', 'number_outpatient', 'number_emergency',
-    'number_inpatient', 'number_diagnoses', 'total_prior_visits',
-    'num_meds_changed', 'num_meds_used', 'a1c_result_enc',
-    'glu_serum_enc', 'insulin_enc',
+    'num_medications', 'number_inpatient', 'number_diagnoses',
+    'total_prior_visits', 'num_meds_changed', 'num_meds_used',
+    'a1c_result_enc', 'insulin_enc',
 ]
+
+# Count features with heavy right-skew — log1p-transformed before scaling
+_LOG_FEATURES = {
+    'num_lab_procedures', 'num_medications', 'number_inpatient',
+    'number_diagnoses', 'total_prior_visits', 'num_meds_used',
+}
 
 # Feature options exposed to the user for the scatter axes
 CLUSTER_DISPLAY_FEATURES = [
@@ -56,7 +63,13 @@ def _load_and_scale():
         return _cache['X_scaled'], _cache['df'], _cache['scaler']
 
     df = load_and_clean()
-    X = df[CLUSTER_CORE_FEATURES].copy().fillna(0)
+    X = df[CLUSTER_CORE_FEATURES].copy()
+    # Fill remaining NaN with column median (missing ≠ 0 for count features)
+    X = X.fillna(X.median())
+    # Log-transform right-skewed count features to reduce outlier influence
+    for col in _LOG_FEATURES:
+        if col in X.columns:
+            X[col] = np.log1p(X[col])
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
@@ -126,36 +139,46 @@ def generate_elbow_chart() -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Cluster scatter (k variable, user-chosen axes)
+# Cluster results: PCA projection + cluster profile chart
 # ─────────────────────────────────────────────────────────────────────────────
 
-def generate_cluster_scatter(k: int, x_feature: str, y_feature: str) -> tuple:
-    """
-    Fit KMeans(k) and return (scatter_b64, pca_b64, metrics_dict).
+_PROFILE_LABELS = {
+    'age_numeric':       'Age',
+    'time_in_hospital':  'Time in Hospital',
+    'num_lab_procedures':'Lab Procedures',
+    'num_medications':   'Medications',
+    'number_inpatient':  'Prior Inpatient',
+    'number_diagnoses':  'Diagnoses',
+    'total_prior_visits':'Prior Visits',
+    'num_meds_changed':  'Meds Changed',
+    'num_meds_used':     'Meds Used',
+    'a1c_result_enc':    'A1C Result',
+    'insulin_enc':       'Insulin',
+}
 
-    metrics_dict keys: k, silhouette, cluster_stats (list of dicts)
+CLUSTER_COLOURS = [
+    '#e74c3c', '#2980b9', '#27ae60', '#8e44ad',
+    '#e67e22', '#16a085', '#c0392b', '#2c3e50',
+]
+
+
+def generate_cluster_results(k: int) -> tuple:
+    """
+    Fit KMeans(k) and return (pca_b64, profile_b64, metrics_dict).
+
+    pca_b64     — PCA 2-D projection coloured by cluster
+    profile_b64 — horizontal grouped bar chart of normalised feature means
+    metrics_dict keys: k, silhouette, cluster_stats
     """
     k = max(2, min(8, k))
-
-    # Validate feature names
-    valid = {f for f, _ in CLUSTER_DISPLAY_FEATURES}
-    if x_feature not in valid:
-        x_feature = 'age_numeric'
-    if y_feature not in valid:
-        y_feature = 'time_in_hospital'
-
     X_scaled, df, _ = _load_and_scale()
 
     km = KMeans(n_clusters=k, random_state=42, n_init=10, max_iter=300)
     labels = km.fit_predict(X_scaled)
 
     sil = float(silhouette_score(X_scaled, labels, sample_size=5000, random_state=42))
-
-    x_vals = df[x_feature].values
-    y_vals = df[y_feature].values
     readmit = df['readmitted_early'].values
 
-    # Per-cluster statistics
     cluster_stats = []
     for c in range(k):
         mask = labels == c
@@ -167,50 +190,73 @@ def generate_cluster_scatter(k: int, x_feature: str, y_feature: str) -> tuple:
             'readmission_rate': round(rate, 1),
             'pct_of_total': round(n / len(labels) * 100, 1),
         })
-
     cluster_stats.sort(key=lambda s: s['readmission_rate'], reverse=True)
 
-    # ── Scatter plot ───────────────────────────────────────────────────────────
-    colours = plt.cm.tab10(np.linspace(0, 1, k))
-    x_label = dict(CLUSTER_DISPLAY_FEATURES).get(x_feature, x_feature)
-    y_label = dict(CLUSTER_DISPLAY_FEATURES).get(y_feature, y_feature)
-
-    fig, ax = plt.subplots(figsize=(9, 6))
-    for c in range(k):
-        mask = labels == c
-        stat = next(s for s in cluster_stats if s['cluster'] == c)
-        ax.scatter(x_vals[mask], y_vals[mask],
-                   color=colours[c], alpha=0.3, s=15,
-                   label=f'Cluster {c}  n={stat["n"]:,}  {stat["readmission_rate"]}% readmit')
-
-    ax.set_xlabel(x_label, fontsize=11)
-    ax.set_ylabel(y_label, fontsize=11)
-    ax.set_title(f'K-Means Clustering (k={k})', fontsize=13)
-    ax.legend(fontsize=8, loc='upper right', framealpha=0.9)
-    ax.grid(alpha=0.25)
-    plt.tight_layout()
-    scatter_b64 = _fig_to_b64(fig)
+    colours = [CLUSTER_COLOURS[c % len(CLUSTER_COLOURS)] for c in range(k)]
+    rank_label = {s['cluster']: i for i, s in enumerate(cluster_stats)}
 
     # ── PCA 2-D projection ─────────────────────────────────────────────────────
     pca = PCA(n_components=2, random_state=42)
     X_pca = pca.fit_transform(X_scaled)
     ev = pca.explained_variance_ratio_
 
-    fig2, ax2 = plt.subplots(figsize=(9, 6))
-    for c in range(k):
-        mask = labels == c
-        stat = next(s for s in cluster_stats if s['cluster'] == c)
-        ax2.scatter(X_pca[mask, 0], X_pca[mask, 1],
-                    color=colours[c], alpha=0.3, s=15,
-                    label=f'Cluster {c}  {stat["readmission_rate"]}% readmit')
+    # Subsample for rendering speed (up to 15k points)
+    rng = np.random.RandomState(0)
+    idx = rng.choice(len(X_pca), min(15000, len(X_pca)), replace=False)
 
-    ax2.set_xlabel(f'PC1 ({ev[0]*100:.1f}% variance)', fontsize=11)
-    ax2.set_ylabel(f'PC2 ({ev[1]*100:.1f}% variance)', fontsize=11)
-    ax2.set_title(f'PCA Projection — K-Means (k={k})', fontsize=13)
-    ax2.legend(fontsize=8, loc='upper right', framealpha=0.9)
-    ax2.grid(alpha=0.25)
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for c in range(k):
+        mask_full = labels == c
+        mask_sub = mask_full[idx]
+        stat = next(s for s in cluster_stats if s['cluster'] == c)
+        rank = rank_label[c] + 1
+        ax.scatter(X_pca[idx][mask_sub, 0], X_pca[idx][mask_sub, 1],
+                   color=colours[c], alpha=0.45, s=12, linewidths=0,
+                   label=f'#{rank} Cluster {c}  ({stat["readmission_rate"]}% readmit, n={stat["n"]:,})')
+
+    ax.set_xlabel(f'PC1 — {ev[0]*100:.1f}% variance explained', fontsize=11)
+    ax.set_ylabel(f'PC2 — {ev[1]*100:.1f}% variance explained', fontsize=11)
+    ax.set_title(f'PCA Projection of K-Means Clusters (k={k})', fontsize=13)
+    ax.legend(fontsize=9, loc='upper right', framealpha=0.95,
+              title='Rank by readmission rate', title_fontsize=8)
+    ax.grid(alpha=0.2)
     plt.tight_layout()
-    pca_b64 = _fig_to_b64(fig2)
+    pca_b64 = _fig_to_b64(fig)
+
+    # ── Cluster profile chart ──────────────────────────────────────────────────
+    # Show normalised (z-score relative to overall mean) feature means per cluster
+    feat_cols = list(CLUSTER_CORE_FEATURES)
+    feat_labels = [_PROFILE_LABELS.get(f, f) for f in feat_cols]
+    df_sub = df[feat_cols].copy()
+    overall_mean = df_sub.mean()
+    overall_std  = df_sub.std().replace(0, 1)
+
+    n_feats = len(feat_cols)
+    bar_h = 0.8 / k
+    y_pos = np.arange(n_feats)
+
+    fig2, ax2 = plt.subplots(figsize=(10, max(5, n_feats * 0.55 + 1)))
+    for i, c in enumerate(range(k)):
+        mask = labels == c
+        means = df_sub[mask].mean()
+        z = (means - overall_mean) / overall_std
+        offset = (i - k / 2 + 0.5) * bar_h
+        stat = next(s for s in cluster_stats if s['cluster'] == c)
+        rank = rank_label[c] + 1
+        ax2.barh(y_pos + offset, z.values, height=bar_h * 0.9,
+                 color=colours[c], alpha=0.85,
+                 label=f'#{rank} Cluster {c} ({stat["readmission_rate"]}% readmit)')
+
+    ax2.axvline(0, color='#333', lw=1.2, ls='--', alpha=0.6)
+    ax2.set_yticks(y_pos)
+    ax2.set_yticklabels(feat_labels, fontsize=10)
+    ax2.set_xlabel('Z-score relative to overall mean\n(positive = above average, negative = below average)', fontsize=10)
+    ax2.set_title(f'Cluster Feature Profiles — what defines each group (k={k})', fontsize=12)
+    ax2.legend(fontsize=9, loc='lower right', framealpha=0.95,
+               title='Rank by readmission rate', title_fontsize=8)
+    ax2.grid(axis='x', alpha=0.2)
+    plt.tight_layout()
+    profile_b64 = _fig_to_b64(fig2)
 
     metrics = {
         'k': k,
@@ -218,4 +264,4 @@ def generate_cluster_scatter(k: int, x_feature: str, y_feature: str) -> tuple:
         'cluster_stats': cluster_stats,
         'pca_variance': round(float(sum(ev)) * 100, 1),
     }
-    return scatter_b64, pca_b64, metrics
+    return pca_b64, profile_b64, metrics

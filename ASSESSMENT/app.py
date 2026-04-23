@@ -204,10 +204,13 @@ def model():
     _pos   = sum(cm[1])
     minority_pct = round(_pos / _total * 100, 1) if _total else 0
 
+    comparison = load_comparison()
+
     return render_template('model.html',
                            metrics=metrics, result=result, form=form,
                            age_ranges=age_ranges, diag_cats=diag_cats,
-                           minority_pct=minority_pct)
+                           minority_pct=minority_pct,
+                           comparison=comparison)
 
 
 @app.route('/performance')
@@ -292,17 +295,10 @@ def api_cluster_elbow():
 
 @app.route('/api/cluster')
 def api_cluster():
-    from clustering import generate_cluster_scatter, CLUSTER_DISPLAY_FEATURES
+    from clustering import generate_cluster_results
     k = max(2, min(8, int(request.args.get('k', 3))))
-    valid = {f for f, _ in CLUSTER_DISPLAY_FEATURES}
-    x = request.args.get('x', 'age_numeric')
-    y = request.args.get('y', 'time_in_hospital')
-    if x not in valid:
-        x = 'age_numeric'
-    if y not in valid:
-        y = 'time_in_hospital'
-    scatter_b64, pca_b64, metrics = generate_cluster_scatter(k, x, y)
-    return jsonify({'scatter': scatter_b64, 'pca': pca_b64, 'metrics': metrics})
+    pca_b64, profile_b64, metrics = generate_cluster_results(k)
+    return jsonify({'pca': pca_b64, 'profile': profile_b64, 'metrics': metrics})
 
 
 if __name__ == '__main__':
