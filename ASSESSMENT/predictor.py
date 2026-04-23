@@ -19,9 +19,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.model_selection import cross_val_score, StratifiedKFold, train_test_split
-from sklearn.utils.class_weight import compute_sample_weight
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.pipeline import Pipeline
+from xgboost import XGBClassifier
+from sklearn.preprocessing import StandardScaler, PolynomialFeatures
+from sklearn.model_selection import cross_validate, StratifiedKFold, train_test_split
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -34,7 +36,8 @@ from sklearn.metrics import (
 from cleaning import (
     load_and_clean, get_features_and_target,
     FEATURE_COLS, TARGET_COL,
-    AGE_MIDPOINTS, DIAG_CAT_MAP, _A1C_MAP, _GLU_MAP, _MED_MAP,
+    AGE_MIDPOINTS, DIAG_CAT_MAP, _DIAG_CAT_ORDER,
+    _A1C_MAP, _GLU_MAP, _MED_MAP,
     _RACE_MAP, _ADMISSION_TYPE_MAP,
 )
 
@@ -48,14 +51,22 @@ COMPARISON_JSON  = os.path.join(MODEL_DIR, 'comparison.json')
 # Model configurations
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Top-10 features by GBM importance (stable across runs on this dataset).
+# LR uses pairwise interactions on these only — 45 terms, fast lbfgs solve.
+LR_POLY_FEATURES = [
+    'discharge_disposition_id', 'discharge_grp', 'high_risk_discharge',
+    'number_inpatient', 'num_lab_procedures', 'age_numeric',
+    'num_medications', 'has_prior_inpatient', 'diag_1_cat_enc',
+    'time_in_hospital',
+]
+
 MODELS = {
-    'Logistic Regression': LogisticRegression(
-        C=0.1,
-        max_iter=1000,
-        class_weight='balanced',
-        solver='lbfgs',
-        random_state=42,
-    ),
+    'Logistic Regression': Pipeline([
+        ('sc',   StandardScaler()),
+        ('poly', PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)),
+        ('lr',   LogisticRegression(C=0.05, max_iter=2000, class_weight='balanced',
+                                    solver='lbfgs', random_state=42)),
+    ]),
     'Random Forest': RandomForestClassifier(
         n_estimators=300,
         max_depth=8,
@@ -65,21 +76,27 @@ MODELS = {
         n_jobs=-1,
         random_state=42,
     ),
-    'Gradient Boosting': GradientBoostingClassifier(
-        n_estimators=500,
-        learning_rate=0.03,
+    'XGBoost': XGBClassifier(
+        n_estimators=250,
+        learning_rate=0.05,
         max_depth=4,
-        min_samples_leaf=30,
+        min_child_weight=30,
         subsample=0.8,
-        max_features='sqrt',
+        colsample_bytree=0.7,
+        reg_alpha=0.1,
+        reg_lambda=1.0,
+        scale_pos_weight=10,
+        tree_method='hist',    # histogram-based splits — much faster on large datasets
+        eval_metric='logloss',
         random_state=42,
+        n_jobs=-1,
     ),
 }
 
 SHORT_NAMES = {
     'Logistic Regression': 'LR',
     'Random Forest':       'RF',
-    'Gradient Boosting':   'GBM',
+    'XGBoost':             'XGB',
 }
 
 
@@ -87,38 +104,47 @@ SHORT_NAMES = {
 # Training — all three models
 # ─────────────────────────────────────────────────────────────────────────────
 
-def train_all_models() -> dict:
+def train_all_models(progress_cb=None) -> dict:
     """
-    Train Logistic Regression, Random Forest, and Gradient Boosting on an
-    80/20 stratified split. Select the best by ROC-AUC and save it as the
+    Train Logistic Regression, Random Forest, and XGBoost on an 80/20
+    stratified split. Select the best by ROC-AUC and save it as the
     active prediction model.
 
+    progress_cb: optional callable(message: str) for live progress reporting.
     Returns the best model's performance dict (also written to performance.json).
     """
+    def _progress(msg: str):
+        print(msg, flush=True)
+        if progress_cb:
+            progress_cb(msg)
+
     os.makedirs(MODEL_DIR, exist_ok=True)
 
+    _progress('Loading and preparing data…')
     X, y = get_features_and_target()
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.20, random_state=42, stratify=y
     )
-    sample_weights = compute_sample_weight('balanced', y_train)
+
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
     comparison = {}
     best_name  = None
     best_auc   = -1.0
+    best_cv_acc: np.ndarray = np.array([])
 
-    for name, model in MODELS.items():
-        print(f'Training {name}…', flush=True)
+    model_names = list(MODELS.keys())
+    for idx, (name, model) in enumerate(MODELS.items(), 1):
+        _progress(f'Training {name} ({idx}/{len(model_names)})…')
 
-        # GBM accepts sample_weight in fit(); LR and RF use class_weight='balanced'
-        if name == 'Gradient Boosting':
-            model.fit(X_train, y_train, sample_weight=sample_weights)
-        else:
-            model.fit(X_train, y_train)
+        # LR uses a subset of features for polynomial interactions
+        Xtr = X_train[LR_POLY_FEATURES] if name == 'Logistic Regression' else X_train
+        Xte = X_test[LR_POLY_FEATURES]  if name == 'Logistic Regression' else X_test
 
-        y_pred  = model.predict(X_test)
-        y_proba = model.predict_proba(X_test)[:, 1]
+        model.fit(Xtr, y_train)
+
+        y_pred  = model.predict(Xte)
+        y_proba = model.predict_proba(Xte)[:, 1]
 
         acc       = accuracy_score(y_test, y_pred)
         roc_auc   = roc_auc_score(y_test, y_proba)
@@ -130,11 +156,16 @@ def train_all_models() -> dict:
             target_names=['Not Early', 'Early (<30d)'],
             output_dict=True,
         )
-        train_acc = accuracy_score(y_train, model.predict(X_train))
+        train_acc = accuracy_score(y_train, model.predict(Xtr))
         gap       = round((train_acc - acc) * 100, 2)
 
-        cv_roc = cross_val_score(model, X_train, y_train,
-                                 cv=cv, scoring='roc_auc', n_jobs=1)
+        _progress(f'Cross-validating {name}…')
+        cv_results = cross_validate(model, Xtr, y_train,
+                                    cv=cv,
+                                    scoring={'roc_auc': 'roc_auc', 'accuracy': 'accuracy'},
+                                    n_jobs=1)
+        cv_roc = cv_results['test_roc_auc']
+        cv_acc = cv_results['test_accuracy']
 
         # Find threshold that maximises F1 for the minority class
         thresholds = np.linspace(0.05, 0.95, 300)
@@ -159,6 +190,8 @@ def train_all_models() -> dict:
             'overfit_gap':     gap,
             'cv_roc_mean':     round(float(cv_roc.mean()), 4),
             'cv_roc_std':      round(float(cv_roc.std()), 4),
+            'cv_acc_scores':   cv_acc.tolist(),
+            'cv_acc_mean':     round(float(cv_acc.mean()), 4),
             'per_class': {
                 'Not Early': {
                     'precision': round(report['Not Early']['precision'], 3),
@@ -201,6 +234,7 @@ def train_all_models() -> dict:
             best_y_proba   = y_proba
             best_report    = opt_report
             best_cv_roc    = cv_roc
+            best_cv_acc    = cv_acc
             best_threshold = opt_threshold
 
     print(f'Best model: {best_name} (ROC-AUC={best_auc:.4f})', flush=True)
@@ -260,7 +294,7 @@ def train_all_models() -> dict:
         'test_acc':  comparison[best_name]['accuracy'],
         'train_acc': comparison[best_name]['train_acc'],
         'roc_auc':   comparison[best_name]['roc_auc'],
-        'cv_acc':    [],
+        'cv_acc':    best_cv_acc.tolist(),
         'cv_roc':    best_cv_roc.tolist(),
         'n_train':   int(len(X_train)),
         'n_test':    int(len(X_test)),
@@ -269,6 +303,7 @@ def train_all_models() -> dict:
         'loo_roc':   comparison[best_name]['cv_roc_mean'],
     }
 
+    _progress(f'Saving results — best model: {best_name}…')
     with open(PERFORMANCE_JSON, 'w') as f:
         json.dump(results, f, indent=2)
 
@@ -278,12 +313,13 @@ def train_all_models() -> dict:
     meta = {'feature_cols': FEATURE_COLS, 'target_col': TARGET_COL}
     with open(ENCODERS_PATH, 'wb') as f:
         pickle.dump(meta, f)
+    _progress('Training complete.')
 
     return results
 
 
-def train() -> dict:
-    return train_all_models()
+def train(progress_cb=None) -> dict:
+    return train_all_models(progress_cb=progress_cb)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -320,12 +356,19 @@ def compare_models() -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _get_importance(model) -> dict:
-    if hasattr(model, 'feature_importances_'):
+    inner = model.named_steps.get('lr', model) if isinstance(model, Pipeline) else model
+    if hasattr(inner, 'feature_importances_'):
         return {k: round(float(v), 4)
-                for k, v in zip(FEATURE_COLS, model.feature_importances_)}
-    if hasattr(model, 'coef_'):
+                for k, v in zip(FEATURE_COLS, inner.feature_importances_)}
+    if hasattr(inner, 'coef_'):
+        # Poly pipeline — coefficients map to interaction terms, not raw features
+        poly = model.named_steps.get('poly') if isinstance(model, Pipeline) else None
+        if poly is not None:
+            names = poly.get_feature_names_out(LR_POLY_FEATURES)
+            return {n: round(float(abs(v)), 4)
+                    for n, v in zip(names, inner.coef_[0])}
         return {k: round(float(abs(v)), 4)
-                for k, v in zip(FEATURE_COLS, model.coef_[0])}
+                for k, v in zip(FEATURE_COLS, inner.coef_[0])}
     return {}
 
 
@@ -379,21 +422,33 @@ def _save_confusion_matrix(y_test, y_pred, class_names, model_name=''):
 
 
 def _save_feature_importance(model, model_name=''):
-    if hasattr(model, 'feature_importances_'):
-        importances = model.feature_importances_
+    # Unwrap Pipeline to get the underlying estimator
+    inner = model.named_steps['lr'] if isinstance(model, Pipeline) and 'lr' in model.named_steps else model
+
+    if hasattr(inner, 'feature_importances_'):
+        importances = inner.feature_importances_
+        feat_labels = [c.replace('_', ' ').title() for c in FEATURE_COLS]
         xlabel = 'Feature Importance (Gini)'
-    elif hasattr(model, 'coef_'):
-        importances = np.abs(model.coef_[0])
-        xlabel = 'Coefficient Magnitude (|coef|)'
+    elif hasattr(inner, 'coef_'):
+        # For poly LR the coef_ dimension = number of poly terms, not raw features
+        # Use the raw feature coefficients from the step before poly expansion
+        poly = model.named_steps.get('poly') if isinstance(model, Pipeline) else None
+        if poly is not None:
+            coef = np.abs(inner.coef_[0])
+            feat_names = poly.get_feature_names_out(LR_POLY_FEATURES)
+            feat_labels = [n.replace('_', ' ') for n in feat_names]
+            importances = coef
+            xlabel = 'Coefficient Magnitude (|coef|) — interaction features'
+        else:
+            importances = np.abs(inner.coef_[0])
+            feat_labels = [c.replace('_', ' ').title() for c in FEATURE_COLS]
+            xlabel = 'Coefficient Magnitude (|coef|)'
     else:
         return
 
-    labels     = [c.replace('_', ' ').title() for c in FEATURE_COLS]
     sorted_idx = np.argsort(importances)[-15:]
-
     fig, ax = plt.subplots(figsize=(8, 6))
-    ax.barh([labels[i] for i in sorted_idx], importances[sorted_idx],
-            color='#2980b9')
+    ax.barh([feat_labels[i] for i in sorted_idx], importances[sorted_idx], color='#2980b9')
     ax.set_xlabel(xlabel)
     ax.set_title(f'Top 15 Feature Importances — {model_name}')
     ax.grid(axis='x', alpha=0.3)
@@ -435,10 +490,6 @@ def predict(
     a1c_enc         = _A1C_MAP.get(a1c_result, 0)
     glu_enc         = _GLU_MAP.get(glu_serum, 0)
     insulin_enc     = _MED_MAP.get(insulin, 0)
-    metformin_enc   = 0
-    glipizide_enc   = 0
-    glyburide_enc   = 0
-    glimepiride_enc = 0
     change_enc      = 1 if medication_changed == 'Ch' else 0
     diab_med_enc    = 1 if diabetes_med == 'Yes' else 0
     adm_type_grp    = _ADMISSION_TYPE_MAP.get(int(admission_type), 3)
@@ -458,21 +509,67 @@ def predict(
     long_stay           = 1 if time_in_hospital >= 7 else 0
     multimorbid         = 1 if number_diagnoses >= 7 else 0
 
-    features = pd.DataFrame([[
+    # Care intensity ratios
+    labs_per_day       = num_lab_procedures / (time_in_hospital + 1)
+    procedures_per_day = num_procedures      / (time_in_hospital + 1)
+    meds_per_day       = num_medications     / (time_in_hospital + 1)
+
+    # Cross-diagnosis flags (only diag_1 known from form; diag_2/3 assumed Other)
+    diag_diabetes_any    = 1 if diag_1_category == 'Diabetes'    else 0
+    diag_circulatory_any = 1 if diag_1_category == 'Circulatory' else 0
+
+    # Lab test ordered flags
+    is_a1c_tested = 1 if a1c_enc > 0 else 0
+    is_glu_tested = 1 if glu_enc  > 0 else 0
+
+    # Prior care risk flags
+    high_prior_inpatient = 1 if number_inpatient >= 3 else 0
+    repeat_ed_user       = 1 if number_emergency >= 2 else 0
+
+    # One-hot primary diagnosis
+    diag_1_ohe = {f'diag_1_{cat.lower()}': int(diag_1_category == cat)
+                  for cat in _DIAG_CAT_ORDER}
+
+    all_features = pd.DataFrame([[
         age_numeric, gender_enc, race_enc,
         time_in_hospital, adm_type_grp, discharge_grp,
         discharge_disp_raw, admission_source_grp,
         num_lab_procedures, num_procedures, num_medications,
         number_outpatient, number_emergency, number_inpatient, number_diagnoses,
         a1c_enc, glu_enc,
-        insulin_enc, metformin_enc, glipizide_enc, glyburide_enc, glimepiride_enc,
+        # medications
+        insulin_enc, 0, 0, 0, 0,    # metformin/glipizide/glyburide/glimepiride default 0
+        0, 0, 0,                     # pioglitazone/rosiglitazone/repaglinide default 0
         change_enc, diab_med_enc, num_meds_changed, num_meds_used,
+        # engineered
         total_prior_visits, has_prior_inpatient, high_risk_discharge,
         insulin_down, poor_glycaemic_ctrl, long_stay, multimorbid,
+        # intensity ratios
+        labs_per_day, procedures_per_day, meds_per_day,
+        # comorbidity flags
+        diag_diabetes_any, diag_circulatory_any,
+        # lab test flags
+        is_a1c_tested, is_glu_tested,
+        # prior care risk
+        high_prior_inpatient, repeat_ed_user,
+        # diagnosis ordinals
         diag1_enc,
         8,  # diag_2_cat_enc = Other
         8,  # diag_3_cat_enc = Other
+        # one-hot primary diagnosis
+        diag_1_ohe['diag_1_diabetes'],
+        diag_1_ohe['diag_1_circulatory'],
+        diag_1_ohe['diag_1_respiratory'],
+        diag_1_ohe['diag_1_digestive'],
+        diag_1_ohe['diag_1_genitourinary'],
+        diag_1_ohe['diag_1_musculoskeletal'],
+        diag_1_ohe['diag_1_injury'],
+        diag_1_ohe['diag_1_neoplasms'],
+        diag_1_ohe['diag_1_other'],
     ]], columns=FEATURE_COLS)
+
+    # Pipeline (LR) only needs its subset of features
+    features = all_features[LR_POLY_FEATURES] if isinstance(model, Pipeline) else all_features
 
     proba = model.predict_proba(features)[0]
 

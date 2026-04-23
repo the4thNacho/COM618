@@ -264,6 +264,49 @@ def clean(raw: pd.DataFrame) -> pd.DataFrame:
     # Many diagnoses — indicator of multimorbidity
     df['multimorbid'] = (df['number_diagnoses'] >= 7).astype(int)
 
+    # ── Step 14c: Additional clinically-significant medications ──────────────
+    # pioglitazone / rosiglitazone (TZDs) and repaglinide already encoded in
+    # step 10 — no extra code needed, just referenced in FEATURE_COLS below.
+
+    # ── Step 14d: Care intensity ratios (per day of stay) ────────────────────
+    # Normalising by stay length removes the confound that long stays naturally
+    # accumulate more procedures; what matters is intensity relative to duration.
+    df['labs_per_day']       = df['num_lab_procedures'] / (df['time_in_hospital'] + 1)
+    df['procedures_per_day'] = df['num_procedures']      / (df['time_in_hospital'] + 1)
+    df['meds_per_day']       = df['num_medications']     / (df['time_in_hospital'] + 1)
+
+    # ── Step 14e: Cross-diagnosis comorbidity flags ───────────────────────────
+    # Whether diabetes or circulatory disease appears in any of the three
+    # diagnosis positions, regardless of which is primary.
+    diab_code = DIAG_CAT_MAP['Diabetes']
+    circ_code = DIAG_CAT_MAP['Circulatory']
+    df['diag_diabetes_any']    = (
+        (df['diag_1_cat_enc'] == diab_code) |
+        (df['diag_2_cat_enc'] == diab_code) |
+        (df['diag_3_cat_enc'] == diab_code)
+    ).astype(int)
+    df['diag_circulatory_any'] = (
+        (df['diag_1_cat_enc'] == circ_code) |
+        (df['diag_2_cat_enc'] == circ_code) |
+        (df['diag_3_cat_enc'] == circ_code)
+    ).astype(int)
+
+    # ── Step 14f: Lab test binary flags ──────────────────────────────────────
+    # Whether a test was ordered at all can signal clinical suspicion
+    # independently of the ordinal result level.
+    df['is_a1c_tested'] = (df['a1c_result_enc'] > 0).astype(int)
+    df['is_glu_tested'] = (df['glu_serum_enc']  > 0).astype(int)
+
+    # ── Step 14g: Prior care risk flags ──────────────────────────────────────
+    df['high_prior_inpatient'] = (df['number_inpatient'] >= 3).astype(int)
+    df['repeat_ed_user']       = (df['number_emergency'] >= 2).astype(int)
+
+    # ── Step 14h: One-hot primary diagnosis ──────────────────────────────────
+    # diag_1 is the principal diagnosis — the single strongest categorical
+    # signal. One-hot avoids the false ordinality of label encoding.
+    for cat in _DIAG_CAT_ORDER:
+        df[f'diag_1_{cat.lower()}'] = (df['diag_1_category'] == cat).astype(int)
+
     # ── Step 15: Target variable ──────────────────────────────────────────────
     # Binary: readmitted within 30 days = 1 (early readmission), else = 0.
     # This is the clinically significant outcome — avoiding early readmission
@@ -512,17 +555,20 @@ FEATURE_COLS = [
     # Lab results
     'a1c_result_enc',
     'glu_serum_enc',
-    # Medications
+    # Medications (individual)
     'insulin_enc',
     'metformin_enc',
     'glipizide_enc',
     'glyburide_enc',
     'glimepiride_enc',
+    'pioglitazone_enc',
+    'rosiglitazone_enc',
+    'repaglinide_enc',
     'change_enc',
     'diabetes_med_enc',
     'num_meds_changed',
     'num_meds_used',
-    # Engineered interaction / derived features
+    # Engineered: binary flags and derived
     'total_prior_visits',
     'has_prior_inpatient',
     'high_risk_discharge',
@@ -530,10 +576,33 @@ FEATURE_COLS = [
     'poor_glycaemic_control',
     'long_stay',
     'multimorbid',
-    # Diagnosis categories
+    # Engineered: care intensity ratios
+    'labs_per_day',
+    'procedures_per_day',
+    'meds_per_day',
+    # Engineered: comorbidity flags
+    'diag_diabetes_any',
+    'diag_circulatory_any',
+    # Engineered: lab test ordered flags
+    'is_a1c_tested',
+    'is_glu_tested',
+    # Engineered: prior care risk flags
+    'high_prior_inpatient',
+    'repeat_ed_user',
+    # Diagnosis ordinal (diag_2 / diag_3 keep ordinal; diag_1 one-hot below)
     'diag_1_cat_enc',
     'diag_2_cat_enc',
     'diag_3_cat_enc',
+    # One-hot primary diagnosis (9 categories)
+    'diag_1_diabetes',
+    'diag_1_circulatory',
+    'diag_1_respiratory',
+    'diag_1_digestive',
+    'diag_1_genitourinary',
+    'diag_1_musculoskeletal',
+    'diag_1_injury',
+    'diag_1_neoplasms',
+    'diag_1_other',
 ]
 
 TARGET_COL = 'readmitted_early'

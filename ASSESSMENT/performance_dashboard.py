@@ -29,9 +29,9 @@ def _ensure_dir():
 
 def chart_cv_scores(perf: dict) -> str:
     _ensure_dir()
-    cv_acc = np.array(perf.get('cv_acc', [0]*5))
-    cv_roc = np.array(perf.get('cv_roc', [0]*5))
-    folds = list(range(1, len(cv_acc) + 1))
+    cv_roc = np.array(perf['cv_roc'])
+    cv_acc = np.array(perf['cv_acc'])
+    folds = list(range(1, len(cv_roc) + 1))
 
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(folds, cv_acc * 100, 'o-', color='#2980b9', label='Accuracy', lw=2)

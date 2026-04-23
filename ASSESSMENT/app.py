@@ -14,14 +14,15 @@ Routes:
 """
 
 import os
+import threading
 
 import pandas as pd
-from flask import Flask, render_template, request, send_file, jsonify
+from flask import Flask, render_template, request, send_file, jsonify, url_for
 
 from predictor import (
     train, predict as make_prediction,
     load_performance, load_comparison,
-    MODEL_DIR, MODEL_PATH,
+    MODEL_DIR, MODEL_PATH, PERFORMANCE_JSON, COMPARISON_JSON,
 )
 from cleaning import (
     get_cleaning_stats, run_cleaning_pipeline,
@@ -30,6 +31,44 @@ from cleaning import (
 )
 
 app = Flask(__name__)
+
+# ─── Background training state ───────────────────────────────────────────────
+_training_lock  = threading.Lock()
+_training_state = {'running': False, 'message': 'Idle', 'error': None}
+
+
+def _needs_training() -> bool:
+    return not (os.path.exists(PERFORMANCE_JSON) and os.path.exists(COMPARISON_JSON))
+
+
+def _start_training_if_needed() -> bool:
+    """Start background training if models are missing. Returns True if training was started or is running."""
+    with _training_lock:
+        if _training_state['running']:
+            return True
+        if not _needs_training():
+            return False
+        _training_state['running'] = True
+        _training_state['message'] = 'Starting…'
+        _training_state['error']   = None
+
+    def _run():
+        try:
+            def cb(msg):
+                with _training_lock:
+                    _training_state['message'] = msg
+            train(progress_cb=cb)
+        except Exception as exc:
+            with _training_lock:
+                _training_state['error']   = str(exc)
+                _training_state['message'] = f'Error: {exc}'
+        finally:
+            with _training_lock:
+                _training_state['running'] = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return True
+
 
 BASE_DIR            = os.path.dirname(__file__)
 EXPLORATION_VISUALS = os.path.join(BASE_DIR, 'exploration_visuals')
@@ -133,10 +172,7 @@ STRATEGY_TABLE = [
 
 
 def _get_metrics():
-    try:
-        return load_performance()
-    except Exception:
-        return train()
+    return load_performance()
 
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
@@ -164,8 +200,18 @@ def exploration():
     return render_template('exploration.html', readmission_rate=stats['readmission_rate'])
 
 
+@app.route('/api/training_status')
+def training_status():
+    with _training_lock:
+        state = dict(_training_state)
+    state['ready'] = not _needs_training() and not state['running']
+    return jsonify(state)
+
+
 @app.route('/model', methods=['GET', 'POST'])
 def model():
+    if _start_training_if_needed():
+        return render_template('training_loading.html', redirect_to=url_for('model'))
     metrics = _get_metrics()
     result  = None
     form    = {}
@@ -215,6 +261,8 @@ def model():
 
 @app.route('/performance')
 def performance():
+    if _start_training_if_needed():
+        return render_template('training_loading.html', redirect_to=url_for('performance'))
     from performance_dashboard import generate_all
     generate_all()
     perf = load_performance()

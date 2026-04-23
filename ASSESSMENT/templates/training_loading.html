@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Training Models — Please Wait{% endblock %}
+{% block content %}
+
+<div style="max-width:600px; margin:80px auto; text-align:center;">
+    <h1 style="margin-bottom:0.3em;">Training Models</h1>
+    <p class="subtitle" style="margin-bottom:2em;">
+        No cached model found — training Logistic Regression, Random Forest, and
+        Gradient Boosting. This takes around 2–3 minutes the first time.
+    </p>
+
+    <!-- Progress bar -->
+    <div style="background:#1e2a3a; border-radius:8px; overflow:hidden; height:22px; margin-bottom:1.2em;">
+        <div id="progress-bar"
+             style="height:100%; width:5%; background:linear-gradient(90deg,#27ae60,#2ecc71);
+                    transition:width 0.6s ease; border-radius:8px;">
+        </div>
+    </div>
+
+    <!-- Stage indicators -->
+    <div style="display:flex; justify-content:space-between; font-size:0.78em;
+                color:#7f8c9a; margin-bottom:1.8em; padding:0 4px;">
+        <span id="stage-data"   class="stage">Loading data</span>
+        <span id="stage-lr"     class="stage">Logistic Regression</span>
+        <span id="stage-rf"     class="stage">Random Forest</span>
+        <span id="stage-gbm"    class="stage">Gradient Boosting</span>
+        <span id="stage-save"   class="stage">Saving</span>
+    </div>
+
+    <!-- Live message -->
+    <p id="status-msg" style="color:#a0b0c0; font-size:0.95em; min-height:1.4em;">
+        Starting…
+    </p>
+
+    <p style="color:#566573; font-size:0.82em; margin-top:2em;">
+        You will be redirected automatically when training finishes.
+    </p>
+</div>
+
+<style>
+.stage       { transition: color 0.3s; }
+.stage.active { color: #2ecc71; font-weight: 600; }
+.stage.done   { color: #27ae60; }
+</style>
+
+<script>
+const REDIRECT = {{ redirect_to | tojson }};
+const STAGES   = [
+    { id: 'stage-data', keywords: ['loading', 'preparing'] },
+    { id: 'stage-lr',   keywords: ['logistic regression'] },
+    { id: 'stage-rf',   keywords: ['random forest'] },
+    { id: 'stage-gbm',  keywords: ['gradient boosting'] },
+    { id: 'stage-save', keywords: ['saving', 'complete'] },
+];
+const BAR_PCTS = [10, 30, 55, 80, 95];
+
+let lastStageIdx = -1;
+
+function setStage(idx) {
+    if (idx <= lastStageIdx) return;
+    STAGES.forEach((s, i) => {
+        const el = document.getElementById(s.id);
+        if (i < idx)       el.className = 'stage done';
+        else if (i === idx) el.className = 'stage active';
+        else                el.className = 'stage';
+    });
+    document.getElementById('progress-bar').style.width = BAR_PCTS[idx] + '%';
+    lastStageIdx = idx;
+}
+
+function detectStage(msg) {
+    const lower = msg.toLowerCase();
+    for (let i = STAGES.length - 1; i >= 0; i--) {
+        if (STAGES[i].keywords.some(k => lower.includes(k))) return i;
+    }
+    return lastStageIdx;
+}
+
+function poll() {
+    fetch('/api/training_status')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('status-msg').textContent = data.message || '…';
+            const idx = detectStage(data.message || '');
+            if (idx >= 0) setStage(idx);
+
+            if (data.error) {
+                document.getElementById('status-msg').style.color = '#e74c3c';
+                document.getElementById('status-msg').textContent = 'Error: ' + data.error;
+                return; // stop polling on error
+            }
+
+            if (data.ready) {
+                document.getElementById('progress-bar').style.width = '100%';
+                STAGES.forEach(s => document.getElementById(s.id).className = 'stage done');
+                document.getElementById('status-msg').textContent = 'Training complete — redirecting…';
+                setTimeout(() => { window.location.href = REDIRECT; }, 800);
+                return;
+            }
+
+            setTimeout(poll, 1500);
+        })
+        .catch(() => setTimeout(poll, 2000));
+}
+
+poll();
+</script>
+
+{% endblock %}
