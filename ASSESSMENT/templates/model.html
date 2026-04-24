@@ -47,7 +47,7 @@
         <p style="margin-top:0.6rem;">
             <strong>1. Class imbalance makes accuracy misleading.</strong>
             Only ~9% of patients are readmitted within 30 days. A model that predicts
-            <em>nobody</em> is readmitted would achieve ~91% accuracy — but would be
+            <em>nobody</em> is readmitted would achieve ~91% accuracy, but would be
             clinically worthless, missing every at-risk patient. Balanced class weights
             correct for this, deliberately trading raw accuracy for genuine minority-class
             detection. The resulting accuracy (~66%) is lower but honest.
@@ -66,10 +66,9 @@
 
         <p style="margin-top:0.6rem;">
             <strong>3. Published benchmarks on this exact dataset confirm the ceiling.</strong>
-            Strack et al. (2014) — the original paper publishing this UCI dataset —
-            reported ROC-AUC of 0.63–0.67 using logistic regression. Subsequent studies
-            using ensemble methods on the same data report 0.64–0.72 (Duggal et al., 2016;
-            Domingos et al., 2021). Our Gradient Boosting result of <strong>0.661</strong>
+            <a href="https://doi.org/10.1155/2014/781670" target="_blank" style="color:#2980b9;">Strack et al. (2014)</a>,
+            the original paper publishing this UCI dataset, reported ROC-AUC of 0.63 to 0.67 using logistic regression.
+            Our Gradient Boosting result of <strong>0.661</strong>
             sits squarely within the published range. Scores significantly above 0.70 on
             this dataset without additional data sources (notes, imaging, labs time-series)
             are likely the result of data leakage or overfitting.
@@ -78,7 +77,7 @@
         <p style="margin-top:0.6rem;">
             <strong>4. A ROC-AUC of 0.661 is clinically meaningful despite appearing low.</strong>
             A score of 0.661 means the model correctly ranks a randomly chosen readmitted
-            patient above a randomly chosen non-readmitted patient 66.1% of the time —
+            patient above a randomly chosen non-readmitted patient 66.1% of the time,
             versus 50% by random chance. In a hospital cohort of ~1,000 discharges per
             week, using this model to prioritise follow-up for the top 20% of predicted
             risk would concentrate ~45% of actual early readmissions into that flagged
@@ -131,11 +130,17 @@
     </div>
     <div class="insight" style="margin-top:0.8rem;">
         <strong>Why ROC-AUC as the primary metric?</strong> With only ~9% of patients
-        readmitted early, a model predicting "never readmitted" would achieve ~91% accuracy —
-        useless clinically. ROC-AUC measures the model's ability to <em>rank</em> high-risk
+        readmitted early, a model predicting "never readmitted" would achieve ~91% accuracy,
+        which is useless clinically. ROC-AUC measures the model's ability to <em>rank</em> high-risk
         patients above low-risk ones, regardless of the decision threshold.
-        <strong>F1 (Early &lt;30d)</strong> reflects performance on the minority class specifically —
-        the clinically important group.
+        <strong>F1 (Early &lt;30d)</strong> measures how well the model identifies patients who will be 
+        readmitted within 30 days. This is the minority class (only ~9% of patients) but the most 
+        clinically important group, since these are the high-risk patients who need intervention.
+        An F1 score of ~23% means the model has low precision and recall for this rare class. 
+        In practical terms: if the model flags 100 patients as high-risk, only about 15 to 20 would 
+        actually be readmitted early, but it would successfully identify roughly 30% to 40% of all 
+        patients who will be readmitted. This reflects the inherent difficulty of predicting 
+        readmission from hospital records alone.
     </div>
 </div>
 
@@ -335,8 +340,11 @@
         ± {{ (metrics.cross_validation.cv_roc_auc_std * 100) | round(1) }}%).
         Class imbalance (~{{ minority_pct }}% positive rate) means accuracy alone is misleading.
         <strong>F1 (Early &lt;30d) = {{ (metrics.test_performance.f1_minority * 100) | round(1) }}%</strong>
-        reflects the genuine challenge of identifying the minority class — low precision is
-        expected when positive cases are rare and the signal is weak.
+        reflects the genuine challenge of identifying the minority class. This low score balances 
+        precision (how many flagged patients are actually high-risk) and recall (how many 
+        high-risk patients we catch). Low F1 is expected when positive cases are rare and the 
+        signal is weak, but the model still provides value by concentrating risk better than 
+        random selection.
     </div>
 </div>
 
