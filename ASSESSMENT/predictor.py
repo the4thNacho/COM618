@@ -2,9 +2,11 @@
 Readmission predictor for the Diabetes 130-US Hospitals dataset.
 
 Task    : Binary classification — early readmission within 30 days (<30) vs not.
-Models  : Logistic Regression (baseline), Random Forest, Gradient Boosting.
-          All three are trained and compared; the best by ROC-AUC is saved as the
-          active prediction model.
+Model   : Gradient Boosting Classifier (sklearn GradientBoostingClassifier)
+Dataset : 101,766 patient encounters, cleaned to ~70k unique patients.
+
+Selected model rationale and hyperparameter decisions documented in
+docs/dataset_decisions.md
 """
 
 import json
@@ -17,27 +19,21 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
-
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.pipeline import Pipeline
-from xgboost import XGBClassifier
-from sklearn.preprocessing import StandardScaler, PolynomialFeatures
-from sklearn.model_selection import cross_validate, StratifiedKFold, train_test_split
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.model_selection import cross_val_score, StratifiedKFold, train_test_split
+from sklearn.utils.class_weight import compute_sample_weight
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
     confusion_matrix,
     roc_auc_score,
     average_precision_score,
-    f1_score,
 )
 
 from cleaning import (
     load_and_clean, get_features_and_target,
     FEATURE_COLS, TARGET_COL,
-    AGE_MIDPOINTS, DIAG_CAT_MAP, _DIAG_CAT_ORDER,
-    _A1C_MAP, _GLU_MAP, _MED_MAP,
+    AGE_MIDPOINTS, DIAG_CAT_MAP, _A1C_MAP, _GLU_MAP, _MED_MAP,
     _RACE_MAP, _ADMISSION_TYPE_MAP,
 )
 
@@ -47,316 +43,142 @@ ENCODERS_PATH    = os.path.join(MODEL_DIR, 'encoders.pkl')
 PERFORMANCE_JSON = os.path.join(MODEL_DIR, 'performance.json')
 COMPARISON_JSON  = os.path.join(MODEL_DIR, 'comparison.json')
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Model configurations
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Top-10 features by GBM importance (stable across runs on this dataset).
-# LR uses pairwise interactions on these only — 45 terms, fast lbfgs solve.
-LR_POLY_FEATURES = [
-    'discharge_disposition_id', 'discharge_grp', 'high_risk_discharge',
-    'number_inpatient', 'num_lab_procedures', 'age_numeric',
-    'num_medications', 'has_prior_inpatient', 'diag_1_cat_enc',
-    'time_in_hospital',
-]
-
-MODELS = {
-    'Logistic Regression': Pipeline([
-        ('sc',   StandardScaler()),
-        ('poly', PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)),
-        ('lr',   LogisticRegression(C=0.05, max_iter=2000, class_weight='balanced',
-                                    solver='lbfgs', random_state=42)),
-    ]),
-    'Random Forest': RandomForestClassifier(
-        n_estimators=300,
-        max_depth=8,
-        min_samples_leaf=20,
-        max_features='sqrt',
-        class_weight='balanced',
-        n_jobs=-1,
-        random_state=42,
-    ),
-    'XGBoost': XGBClassifier(
-        n_estimators=300,         # Moderate number of trees
-        learning_rate=0.05,       # Balanced learning rate
-        max_depth=4,              # Allow 4-way interactions
-        min_child_weight=40,      # Moderate regularization (increased from 30)
-        subsample=0.8,            # Standard stochastic training
-        colsample_bytree=0.7,     # Feature subsampling
-        reg_alpha=0.2,            # Light L1 regularization
-        reg_lambda=1.5,           # Moderate L2 regularization
-        scale_pos_weight=9,       # Match the ~9:1 class imbalance (was 10)
-        tree_method='hist',       # histogram-based splits — much faster on large datasets
-        eval_metric='logloss',
-        random_state=42,
-        n_jobs=-1,
-    ),
-}
-
-SHORT_NAMES = {
-    'Logistic Regression': 'LR',
-    'Random Forest':       'RF',
-    'XGBoost':             'XGB',
+# GradientBoosting hyperparameters — best test ROC-AUC in model comparison
+# (see docs/model_comparison.md — XGBoost/LightGBM trialled but GBM won on held-out test AUC)
+GB_CONFIG = {
+    'n_estimators':    500,
+    'learning_rate':   0.05,
+    'max_depth':       4,
+    'min_samples_leaf': 30,
+    'subsample':       0.8,
+    'max_features':    'sqrt',
+    'random_state':    42,
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Training — all three models
+# Training
 # ─────────────────────────────────────────────────────────────────────────────
 
-def train_all_models(progress_cb=None) -> dict:
+def train() -> dict:
     """
-    Train Logistic Regression, Random Forest, and XGBoost on an 80/20
-    stratified split. Select the best by ROC-AUC and save it as the
-    active prediction model.
+    Train the Gradient Boosting model on the diabetes readmission dataset.
 
-    Args:
-        progress_cb: optional callable(message: str) for live progress reporting.
-    
-    Returns:
-        The best model's performance dict (also written to performance.json).
+    Split   : 80 % train / 20 % test (stratified by readmission label).
+    CV      : 5-fold stratified cross-validation on the training set.
+    Returns : performance metrics dict (also written to performance.json).
     """
-    def _progress(msg: str):
-        print(msg, flush=True)
-        if progress_cb:
-            progress_cb(msg)
-
     os.makedirs(MODEL_DIR, exist_ok=True)
 
-    _progress('Loading and preparing data…')
     X, y = get_features_and_target()
+
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.20, random_state=42, stratify=y
     )
-    
-    # Use balanced class weights + new interaction features (no resampling)
-    _progress(f'Training set: {len(y_train):,} samples ({(y_train==0).sum():,} majority, {(y_train==1).sum():,} minority)')
 
+    sample_weights = compute_sample_weight('balanced', y_train)
+
+    model = GradientBoostingClassifier(**GB_CONFIG)
+    model.fit(X_train, y_train, sample_weight=sample_weights)
+
+    # ── Hold-out evaluation ──────────────────────────────────────────────────
+    y_pred  = model.predict(X_test)
+    y_proba = model.predict_proba(X_test)[:, 1]
+
+    test_acc = accuracy_score(y_test, y_pred)
+    roc_auc  = roc_auc_score(y_test, y_proba)
+    avg_prec = average_precision_score(y_test, y_proba)
+    report   = classification_report(y_test, y_pred,
+                                     target_names=['Not Early', 'Early (<30d)'],
+                                     output_dict=True)
+
+    train_acc = accuracy_score(y_train, model.predict(X_train))
+    gap       = round((train_acc - test_acc) * 100, 2)
+
+    # ── Cross-validation ─────────────────────────────────────────────────────
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cv_acc = cross_val_score(model, X_train, y_train, cv=cv, scoring='accuracy', n_jobs=1)
+    cv_roc = cross_val_score(model, X_train, y_train, cv=cv, scoring='roc_auc', n_jobs=1)
 
-    comparison = {}
-    best_name  = None
-    best_auc   = -1.0
-    best_cv_acc: np.ndarray = np.array([])
+    # ── Confusion matrix data ─────────────────────────────────────────────────
+    cm = confusion_matrix(y_test, y_pred)
 
-    model_names = list(MODELS.keys())
-    for idx, (name, model) in enumerate(MODELS.items(), 1):
-        _progress(f'Training {name} ({idx}/{len(model_names)})…')
+    # ── Feature importance ────────────────────────────────────────────────────
+    # XGBoost returns float32 — convert to plain Python float for JSON serialisation
+    importance = {k: round(float(v), 4)
+                  for k, v in zip(FEATURE_COLS, model.feature_importances_)}
 
-        # LR uses a subset of features for polynomial interactions
-        Xtr = X_train[LR_POLY_FEATURES] if name == 'Logistic Regression' else X_train
-        Xte = X_test[LR_POLY_FEATURES]  if name == 'Logistic Regression' else X_test
-
-        model.fit(Xtr, y_train)
-
-        y_pred  = model.predict(Xte)
-        y_proba = model.predict_proba(Xte)[:, 1]
-
-        acc       = accuracy_score(y_test, y_pred)
-        roc_auc   = roc_auc_score(y_test, y_proba)
-        avg_prec  = average_precision_score(y_test, y_proba)
-        f1_macro  = f1_score(y_test, y_pred, average='macro')
-        f1_minor  = f1_score(y_test, y_pred, pos_label=1, average='binary')
-        report    = classification_report(
-            y_test, y_pred,
-            target_names=['Not Early', 'Early (<30d)'],
-            output_dict=True,
-        )
-        train_acc = accuracy_score(y_train, model.predict(Xtr))
-        gap       = round((train_acc - acc) * 100, 2)
-
-        _progress(f'Cross-validating {name}…')
-        cv_results = cross_validate(model, Xtr, y_train,
-                                    cv=cv,
-                                    scoring={'roc_auc': 'roc_auc', 'accuracy': 'accuracy'},
-                                    n_jobs=1)
-        cv_roc = cv_results['test_roc_auc']
-        cv_acc = cv_results['test_accuracy']
-
-        # Find threshold that maximises F1 for the minority class
-        thresholds = np.linspace(0.05, 0.95, 300)
-        f1s = [f1_score(y_test, (y_proba >= t).astype(int),
-                        pos_label=1, zero_division=0) for t in thresholds]
-        opt_threshold = float(thresholds[int(np.argmax(f1s))])
-        y_pred_opt = (y_proba >= opt_threshold).astype(int)
-        f1_minor_opt = float(max(f1s))
-        f1_macro_opt = f1_score(y_test, y_pred_opt, average='macro')
-
-        cm = confusion_matrix(y_test, y_pred_opt)
-
-        comparison[name] = {
-            'accuracy':        round(accuracy_score(y_test, y_pred_opt), 4),
-            'roc_auc':         round(roc_auc, 4),
-            'avg_precision':   round(avg_prec, 4),
-            'f1_macro':        round(f1_macro_opt, 4),
-            'f1_minority':     round(f1_minor_opt, 4),
-            'f1_minority_default': round(f1_minor, 4),
-            'optimal_threshold': round(opt_threshold, 3),
-            'train_acc':       round(train_acc, 4),
-            'overfit_gap':     gap,
-            'cv_roc_mean':     round(float(cv_roc.mean()), 4),
-            'cv_roc_std':      round(float(cv_roc.std()), 4),
-            'cv_acc_scores':   cv_acc.tolist(),
-            'cv_acc_mean':     round(float(cv_acc.mean()), 4),
-            'per_class': {
-                'Not Early': {
-                    'precision': round(report['Not Early']['precision'], 3),
-                    'recall':    round(report['Not Early']['recall'], 3),
-                    'f1':        round(report['Not Early']['f1-score'], 3),
-                },
-                'Early (<30d)': {
-                    'precision': round(report['Early (<30d)']['precision'], 3),
-                    'recall':    round(report['Early (<30d)']['recall'], 3),
-                    'f1':        round(report['Early (<30d)']['f1-score'], 3),
-                },
-            },
-            'confusion_matrix': cm.tolist(),
-        }
-
-        # recompute per_class report using opt-threshold predictions
-        opt_report = classification_report(
-            y_test, y_pred_opt,
-            target_names=['Not Early', 'Early (<30d)'],
-            output_dict=True,
-        )
-        comparison[name]['per_class'] = {
-            'Not Early': {
-                'precision': round(opt_report['Not Early']['precision'], 3),
-                'recall':    round(opt_report['Not Early']['recall'], 3),
-                'f1':        round(opt_report['Not Early']['f1-score'], 3),
-            },
-            'Early (<30d)': {
-                'precision': round(opt_report['Early (<30d)']['precision'], 3),
-                'recall':    round(opt_report['Early (<30d)']['recall'], 3),
-                'f1':        round(opt_report['Early (<30d)']['f1-score'], 3),
-            },
-        }
-        
-        _progress(f'{name}: ROC-AUC={roc_auc:.5f}, F1={f1_minor_opt:.4f}, Gap={gap:.2f}%')
-
-        # Selection logic: prefer model with best overall performance
-        # 1. If ROC-AUC differs by >0.5%, pick higher ROC-AUC
-        # 2. If tied within 0.5%, pick lower overfitting gap (better generalization)
-        is_better = False
-        if roc_auc - best_auc > 0.005:  # Clearly better ROC-AUC
-            is_better = True
-            _progress(f'  → {name} has better ROC-AUC: {roc_auc:.5f} vs {best_auc:.5f}')
-        elif abs(roc_auc - best_auc) <= 0.005:  # Tied within 0.5%
-            # Use secondary criteria
-            current_gap = abs(gap)
-            best_gap = abs(comparison[best_name]['overfit_gap'])
-            _progress(f'  → ROC-AUC tie: {name} ({roc_auc:.5f}) vs {best_name} ({best_auc:.5f})')
-            _progress(f'  → Comparing gaps: {current_gap:.2f}% vs {best_gap:.2f}%')
-            if current_gap < best_gap - 0.3:  # Meaningfully lower overfitting
-                is_better = True
-                _progress(f'  → Selecting {name} (lower overfitting gap)')
-            elif abs(current_gap - best_gap) < 0.3 and f1_minor_opt > comparison[best_name]['f1_minority']:
-                is_better = True
-                _progress(f'  → Selecting {name} (similar gap but higher F1)')
-        
-        if is_better:
-            best_auc       = roc_auc
-            best_name      = name
-            best_model     = model
-            best_y_pred    = y_pred_opt
-            best_y_proba   = y_proba
-            best_report    = opt_report
-            best_cv_roc    = cv_roc
-            best_cv_acc    = cv_acc
-            best_threshold = opt_threshold
-
-    print(f'Best model: {best_name} (ROC-AUC={best_auc:.4f})', flush=True)
-
-    # ── Save comparison JSON ─────────────────────────────────────────────────
-    comparison_out = {
-        'best_model': best_name,
-        'primary_metric': 'roc_auc',
-        'models': comparison,
-    }
-    with open(COMPARISON_JSON, 'w') as f:
-        json.dump(comparison_out, f, indent=2)
-
-    # ── Save comparison chart ────────────────────────────────────────────────
-    _save_comparison_chart(comparison)
-
-    # ── Save confusion matrix + feature importance for best model ────────────
-    _save_confusion_matrix(
-        y_test.values, best_y_pred,
-        ['Not Early', 'Early (<30d)'],
-        best_name,
-    )
-    _save_feature_importance(best_model, best_name)
-
-    # ── Build and save the best model's full performance dict ────────────────
-    cm_best = comparison[best_name]['confusion_matrix']
     results = {
-        'model': best_name,
+        'model': 'GradientBoostingClassifier',
         'data_splits': {
             'training': int(len(X_train)),
             'test':     int(len(X_test)),
             'total':    int(len(X)),
         },
-        'optimal_threshold': round(best_threshold, 3),
         'test_performance': {
-            'accuracy':      comparison[best_name]['accuracy'],
-            'roc_auc':       comparison[best_name]['roc_auc'],
-            'avg_precision': comparison[best_name]['avg_precision'],
-            'f1_macro':      comparison[best_name]['f1_macro'],
-            'f1_minority':   comparison[best_name]['f1_minority'],
-            'report':        best_report,
+            'accuracy':          round(test_acc, 4),
+            'roc_auc':           round(roc_auc, 4),
+            'avg_precision':     round(avg_prec, 4),
+            'report':            report,
         },
         'training_performance': {
-            'accuracy': comparison[best_name]['train_acc'],
+            'accuracy': round(train_acc, 4),
         },
-        'overfitting_gap': comparison[best_name]['overfit_gap'],
+        'overfitting_gap': gap,
         'cross_validation': {
-            'cv_roc_auc_mean': comparison[best_name]['cv_roc_mean'],
-            'cv_roc_auc_std':  comparison[best_name]['cv_roc_std'],
+            'cv_accuracy_mean': round(float(cv_acc.mean()), 4),
+            'cv_accuracy_std':  round(float(cv_acc.std()), 4),
+            'cv_roc_auc_mean':  round(float(cv_roc.mean()), 4),
+            'cv_roc_auc_std':   round(float(cv_roc.std()), 4),
             'folds': 5,
         },
-        'confusion_matrix': cm_best,
-        'feature_importance': _get_importance(best_model),
-        'per_class': comparison[best_name]['per_class'],
+        'confusion_matrix': cm.tolist(),
+        'feature_importance': importance,
+        'model_config': GB_CONFIG,
+        # Legacy keys expected by performance_dashboard and templates
+        'test_acc':        round(test_acc, 4),
+        'train_acc':       round(train_acc, 4),
+        'roc_auc':         round(roc_auc, 4),
+        'cv_acc':          cv_acc.tolist(),
+        'cv_roc':          cv_roc.tolist(),
+        'fpr':             [],   # not storing full curve to keep JSON small
+        'tpr':             [],
+        'per_class': {
+            'Not Early (<30d)': {
+                'precision': round(report['Not Early']['precision'], 3),
+                'recall':    round(report['Not Early']['recall'], 3),
+                'f1':        round(report['Not Early']['f1-score'], 3),
+            },
+            'Early (<30d)': {
+                'precision': round(report['Early (<30d)']['precision'], 3),
+                'recall':    round(report['Early (<30d)']['recall'], 3),
+                'f1':        round(report['Early (<30d)']['f1-score'], 3),
+            },
+        },
         'class_names': ['Not Early', 'Early (<30d)'],
-        # Legacy keys
-        'test_acc':  comparison[best_name]['accuracy'],
-        'train_acc': comparison[best_name]['train_acc'],
-        'roc_auc':   comparison[best_name]['roc_auc'],
-        'cv_acc':    best_cv_acc.tolist(),
-        'cv_roc':    best_cv_roc.tolist(),
-        'n_train':   int(len(X_train)),
-        'n_test':    int(len(X_test)),
-        'mean_confidence': round(float(best_y_proba.mean()), 4),
+        'mean_confidence': round(float(y_proba.mean()), 4),
+        'overfitting_gap': gap,
+        'n_train': int(len(X_train)),
+        'n_test':  int(len(X_test)),
         'training_mode': 'real_data_only',
-        'loo_roc':   comparison[best_name]['cv_roc_mean'],
+        'loo_acc': round(float(cv_acc.mean()), 4),
+        'loo_roc': round(float(cv_roc.mean()), 4),
     }
 
-    _progress(f'Saving results — best model: {best_name}…')
     with open(PERFORMANCE_JSON, 'w') as f:
         json.dump(results, f, indent=2)
 
+    _save_confusion_matrix(y_test.values, y_pred, ['Not Early', 'Early (<30d)'])
+    _save_feature_importance(model)
+
     with open(MODEL_PATH, 'wb') as f:
-        pickle.dump(best_model, f)
+        pickle.dump(model, f)
 
     meta = {'feature_cols': FEATURE_COLS, 'target_col': TARGET_COL}
     with open(ENCODERS_PATH, 'wb') as f:
         pickle.dump(meta, f)
-    _progress('Training complete.')
 
     return results
-
-
-def train(progress_cb=None) -> dict:
-    """
-    Train all models and select the best by ROC-AUC.
-    
-    Args:
-        progress_cb: Optional callback for progress messages
-    
-    Returns:
-        Performance metrics dictionary
-    """
-    return train_all_models(progress_cb=progress_cb)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -374,14 +196,15 @@ def load_model():
     if not os.path.exists(MODEL_PATH):
         train()
     with open(MODEL_PATH, 'rb') as f:
-        return pickle.load(f)
+        model = pickle.load(f)
+    return model
 
 
 def load_comparison() -> dict:
-    if not os.path.exists(COMPARISON_JSON):
-        train()
-    with open(COMPARISON_JSON) as f:
-        return json.load(f)
+    if os.path.exists(COMPARISON_JSON):
+        with open(COMPARISON_JSON) as f:
+            return json.load(f)
+    return {'best_model': 'GradientBoostingClassifier', 'models': {}}
 
 
 def compare_models() -> dict:
@@ -392,106 +215,31 @@ def compare_models() -> dict:
 # Chart helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_importance(model) -> dict:
-    inner = model.named_steps.get('lr', model) if isinstance(model, Pipeline) else model
-    if hasattr(inner, 'feature_importances_'):
-        return {k: round(float(v), 4)
-                for k, v in zip(FEATURE_COLS, inner.feature_importances_)}
-    if hasattr(inner, 'coef_'):
-        # Poly pipeline — coefficients map to interaction terms, not raw features
-        poly = model.named_steps.get('poly') if isinstance(model, Pipeline) else None
-        if poly is not None:
-            names = poly.get_feature_names_out(LR_POLY_FEATURES)
-            return {n: round(float(abs(v)), 4)
-                    for n, v in zip(names, inner.coef_[0])}
-        return {k: round(float(abs(v)), 4)
-                for k, v in zip(FEATURE_COLS, inner.coef_[0])}
-    return {}
-
-
-def _save_comparison_chart(comparison: dict):
-    names   = list(comparison.keys())
-    short   = [SHORT_NAMES[n] for n in names]
-    metrics = ['accuracy', 'roc_auc', 'f1_macro', 'f1_minority']
-    labels  = ['Accuracy', 'ROC-AUC', 'F1 Macro', 'F1 Minority\n(Early <30d)']
-    colours = ['#2980b9', '#27ae60', '#8e44ad', '#e74c3c']
-
-    x   = np.arange(len(names))
-    w   = 0.18
-    fig, ax = plt.subplots(figsize=(11, 5))
-
-    for i, (metric, label, colour) in enumerate(zip(metrics, labels, colours)):
-        vals = [comparison[n][metric] for n in names]
-        bars = ax.bar(x + i * w, vals, width=w, label=label,
-                      color=colour, alpha=0.85, edgecolor='white')
-        for bar, v in zip(bars, vals):
-            ax.text(bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + 0.005,
-                    f'{v:.2f}', ha='center', va='bottom', fontsize=7.5)
-
-    ax.set_xticks(x + w * 1.5)
-    ax.set_xticklabels(short, fontsize=12)
-    ax.set_ylabel('Score', fontsize=11)
-    ax.set_title('Model Comparison — LR vs Random Forest vs Gradient Boosting',
-                 fontsize=12)
-    ax.set_ylim(0, 0.85)
-    ax.axhline(0.5, color='grey', lw=1, ls='--', alpha=0.4, label='Random baseline')
-    ax.legend(fontsize=9, loc='upper left', ncol=5)
-    ax.grid(axis='y', alpha=0.25)
-    plt.tight_layout()
-    plt.savefig(os.path.join(MODEL_DIR, 'model_comparison.png'),
-                dpi=150, bbox_inches='tight')
-    plt.close()
-
-
-def _save_confusion_matrix(y_test, y_pred, class_names, model_name=''):
+def _save_confusion_matrix(y_test, y_pred, class_names):
     cm = confusion_matrix(y_test, y_pred)
     fig, ax = plt.subplots(figsize=(6, 5))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
                 xticklabels=class_names, yticklabels=class_names)
     ax.set_xlabel('Predicted')
     ax.set_ylabel('Actual')
-    ax.set_title(f'Confusion Matrix — {model_name}')
+    ax.set_title('Confusion Matrix — Readmission Prediction')
     plt.tight_layout()
-    plt.savefig(os.path.join(MODEL_DIR, 'confusion_matrix.png'),
-                dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(MODEL_DIR, 'confusion_matrix.png'), dpi=150, bbox_inches='tight')
     plt.close()
 
 
-def _save_feature_importance(model, model_name=''):
-    # Unwrap Pipeline to get the underlying estimator
-    inner = model.named_steps['lr'] if isinstance(model, Pipeline) and 'lr' in model.named_steps else model
+def _save_feature_importance(model):
+    importances = model.feature_importances_
+    labels = [c.replace('_', ' ').title() for c in FEATURE_COLS]
+    sorted_idx = np.argsort(importances)[-15:]  # top 15
 
-    if hasattr(inner, 'feature_importances_'):
-        importances = inner.feature_importances_
-        feat_labels = [c.replace('_', ' ').title() for c in FEATURE_COLS]
-        xlabel = 'Feature Importance (Gini)'
-    elif hasattr(inner, 'coef_'):
-        # For poly LR the coef_ dimension = number of poly terms, not raw features
-        # Use the raw feature coefficients from the step before poly expansion
-        poly = model.named_steps.get('poly') if isinstance(model, Pipeline) else None
-        if poly is not None:
-            coef = np.abs(inner.coef_[0])
-            feat_names = poly.get_feature_names_out(LR_POLY_FEATURES)
-            feat_labels = [n.replace('_', ' ') for n in feat_names]
-            importances = coef
-            xlabel = 'Coefficient Magnitude (|coef|) — interaction features'
-        else:
-            importances = np.abs(inner.coef_[0])
-            feat_labels = [c.replace('_', ' ').title() for c in FEATURE_COLS]
-            xlabel = 'Coefficient Magnitude (|coef|)'
-    else:
-        return
-
-    sorted_idx = np.argsort(importances)[-15:]
     fig, ax = plt.subplots(figsize=(8, 6))
-    ax.barh([feat_labels[i] for i in sorted_idx], importances[sorted_idx], color='#2980b9')
-    ax.set_xlabel(xlabel)
-    ax.set_title(f'Top 15 Feature Importances — {model_name}')
+    ax.barh([labels[i] for i in sorted_idx], importances[sorted_idx], color='#2980b9')
+    ax.set_xlabel('Feature Importance (Gini)')
+    ax.set_title('Top 15 Feature Importances — Gradient Boosting')
     ax.grid(axis='x', alpha=0.3)
     plt.tight_layout()
-    plt.savefig(os.path.join(MODEL_DIR, 'feature_importance.png'),
-                dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(MODEL_DIR, 'feature_importance.png'), dpi=150, bbox_inches='tight')
     plt.close()
 
 
@@ -519,25 +267,41 @@ def predict(
     admission_type: int,
     diag_1_category: str,
 ) -> dict:
+    """
+    Predict early readmission risk for a single patient encounter.
+
+    Returns dict with 'prediction' (0/1), 'label', and 'probabilities'.
+    """
     model = load_model()
 
-    age_numeric     = AGE_MIDPOINTS.get(age_range, 55)
-    gender_enc      = 1 if gender.lower() == 'male' else 0
-    race_enc        = _RACE_MAP.get(race, 5)
-    a1c_enc         = _A1C_MAP.get(a1c_result, 0)
-    glu_enc         = _GLU_MAP.get(glu_serum, 0)
-    insulin_enc     = _MED_MAP.get(insulin, 0)
-    change_enc      = 1 if medication_changed == 'Ch' else 0
-    diab_med_enc    = 1 if diabetes_med == 'Yes' else 0
-    adm_type_grp    = _ADMISSION_TYPE_MAP.get(int(admission_type), 3)
-    discharge_grp        = 0
-    discharge_disp_raw   = 1
-    admission_source_grp = 0
-    diag1_enc       = DIAG_CAT_MAP.get(diag_1_category, 8)
+    # Basic encodings
+    age_numeric    = AGE_MIDPOINTS.get(age_range, 55)
+    gender_enc     = 1 if gender.lower() == 'male' else 0
+    race_enc       = _RACE_MAP.get(race, 5)
+    a1c_enc        = _A1C_MAP.get(a1c_result, 0)
+    glu_enc        = _GLU_MAP.get(glu_serum, 0)
+    insulin_enc    = _MED_MAP.get(insulin, 0)
+    metformin_enc  = 0
+    glipizide_enc  = 0
+    glyburide_enc  = 0
+    glimepiride_enc = 0
+    pioglitazone_enc = 0
+    rosiglitazone_enc = 0
+    repaglinide_enc = 0
+    change_enc     = 1 if medication_changed == 'Ch' else 0
+    diab_med_enc   = 1 if diabetes_med == 'Yes' else 0
+    adm_type_grp   = _ADMISSION_TYPE_MAP.get(int(admission_type), 3)
+    discharge_grp        = 0   # discharged home
+    discharge_disp_raw   = 1   # discharge_disposition_id=1 (home)
+    admission_source_grp = 0   # physician referral
+    diag1_enc      = DIAG_CAT_MAP.get(diag_1_category, 8)
+    diag2_enc      = 8  # Other
+    diag3_enc      = 8  # Other
 
     num_meds_changed = 1 if insulin in ('Up', 'Down') else 0
     num_meds_used    = 1 if insulin != 'No' else 0
 
+    # Engineered features — basic flags
     total_prior_visits  = number_outpatient + number_emergency + number_inpatient
     has_prior_inpatient = 1 if number_inpatient > 0 else 0
     high_risk_discharge = 1 if discharge_disp_raw in {9, 12, 15, 22, 28} else 0
@@ -546,91 +310,91 @@ def predict(
     long_stay           = 1 if time_in_hospital >= 7 else 0
     multimorbid         = 1 if number_diagnoses >= 7 else 0
 
-    # Care intensity ratios
-    labs_per_day       = num_lab_procedures / (time_in_hospital + 1)
-    procedures_per_day = num_procedures      / (time_in_hospital + 1)
-    meds_per_day       = num_medications     / (time_in_hospital + 1)
+    # Engineered: care intensity ratios
+    labs_per_day = num_lab_procedures / max(time_in_hospital, 1)
+    procedures_per_day = num_procedures / max(time_in_hospital, 1)
+    meds_per_day = num_medications / max(time_in_hospital, 1)
 
-    # Cross-diagnosis flags (only diag_1 known from form; diag_2/3 assumed Other)
-    diag_diabetes_any    = 1 if diag_1_category == 'Diabetes'    else 0
-    diag_circulatory_any = 1 if diag_1_category == 'Circulatory' else 0
+    # Engineered: comorbidity flags (based on diagnosis category)
+    diag_diabetes_any = 1 if diag1_enc == 0 or diag2_enc == 0 or diag3_enc == 0 else 0
+    diag_circulatory_any = 1 if diag1_enc == 1 or diag2_enc == 1 or diag3_enc == 1 else 0
 
-    # Lab test ordered flags
+    # Engineered: lab test ordered flags
     is_a1c_tested = 1 if a1c_enc > 0 else 0
-    is_glu_tested = 1 if glu_enc  > 0 else 0
+    is_glu_tested = 1 if glu_enc > 0 else 0
 
-    # Prior care risk flags
-    high_prior_inpatient = 1 if number_inpatient >= 3 else 0
-    repeat_ed_user       = 1 if number_emergency >= 2 else 0
+    # Engineered: prior care risk flags
+    high_prior_inpatient = 1 if number_inpatient >= 2 else 0
+    repeat_ed_user = 1 if number_emergency >= 2 else 0
 
-    # One-hot primary diagnosis
-    diag_1_ohe = {f'diag_1_{cat.lower()}': int(diag_1_category == cat)
-                  for cat in _DIAG_CAT_ORDER}
+    # Engineered: high-risk interaction features
+    elderly_frequent_inpatient = 1 if age_numeric >= 65 and number_inpatient >= 2 else 0
+    complex_diabetes_stay = 1 if diag_diabetes_any == 1 and time_in_hospital >= 7 else 0
+    unstable_med_regimen = 1 if num_meds_changed >= 2 else 0
+    diabetes_circulatory_comorbid = 1 if diag_diabetes_any == 1 and diag_circulatory_any == 1 else 0
+    premature_discharge_risk = 1 if time_in_hospital <= 2 and number_diagnoses >= 7 else 0
+    er_frequent_readmitter = 1 if number_emergency >= 2 and number_inpatient >= 1 else 0
+    high_intensity_complex = 1 if labs_per_day >= 10 and number_diagnoses >= 9 else 0
+    young_uncontrolled_diabetes = 1 if age_numeric < 50 and a1c_enc >= 2 and diag_diabetes_any == 1 else 0
+    high_risk_discharge_with_history = 1 if high_risk_discharge == 1 and number_inpatient >= 1 else 0
+    severe_med_instability = 1 if num_meds_changed >= 3 or (change_enc == 1 and insulin_enc >= 2) else 0
 
-    all_features = pd.DataFrame([[
+    # One-hot encode primary diagnosis (9 categories)
+    diag_1_diabetes = 1 if diag1_enc == 0 else 0
+    diag_1_circulatory = 1 if diag1_enc == 1 else 0
+    diag_1_respiratory = 1 if diag1_enc == 2 else 0
+    diag_1_digestive = 1 if diag1_enc == 3 else 0
+    diag_1_genitourinary = 1 if diag1_enc == 4 else 0
+    diag_1_musculoskeletal = 1 if diag1_enc == 5 else 0
+    diag_1_injury = 1 if diag1_enc == 6 else 0
+    diag_1_neoplasms = 1 if diag1_enc == 7 else 0
+    diag_1_other = 1 if diag1_enc == 8 else 0
+
+    # Values in the exact order of FEATURE_COLS (67 features total)
+    features = pd.DataFrame([[
         age_numeric, gender_enc, race_enc,
         time_in_hospital, adm_type_grp, discharge_grp,
         discharge_disp_raw, admission_source_grp,
         num_lab_procedures, num_procedures, num_medications,
         number_outpatient, number_emergency, number_inpatient, number_diagnoses,
         a1c_enc, glu_enc,
-        # medications
-        insulin_enc, 0, 0, 0, 0,    # metformin/glipizide/glyburide/glimepiride default 0
-        0, 0, 0,                     # pioglitazone/rosiglitazone/repaglinide default 0
+        insulin_enc, metformin_enc, glipizide_enc, glyburide_enc, glimepiride_enc,
+        pioglitazone_enc, rosiglitazone_enc, repaglinide_enc,
         change_enc, diab_med_enc, num_meds_changed, num_meds_used,
-        # engineered
         total_prior_visits, has_prior_inpatient, high_risk_discharge,
         insulin_down, poor_glycaemic_ctrl, long_stay, multimorbid,
-        # intensity ratios
         labs_per_day, procedures_per_day, meds_per_day,
-        # comorbidity flags
         diag_diabetes_any, diag_circulatory_any,
-        # lab test flags
         is_a1c_tested, is_glu_tested,
-        # prior care risk
         high_prior_inpatient, repeat_ed_user,
-        # diagnosis ordinals
-        diag1_enc,
-        8,  # diag_2_cat_enc = Other
-        8,  # diag_3_cat_enc = Other
-        # one-hot primary diagnosis
-        diag_1_ohe['diag_1_diabetes'],
-        diag_1_ohe['diag_1_circulatory'],
-        diag_1_ohe['diag_1_respiratory'],
-        diag_1_ohe['diag_1_digestive'],
-        diag_1_ohe['diag_1_genitourinary'],
-        diag_1_ohe['diag_1_musculoskeletal'],
-        diag_1_ohe['diag_1_injury'],
-        diag_1_ohe['diag_1_neoplasms'],
-        diag_1_ohe['diag_1_other'],
+        elderly_frequent_inpatient, complex_diabetes_stay, unstable_med_regimen,
+        diabetes_circulatory_comorbid, premature_discharge_risk, er_frequent_readmitter,
+        high_intensity_complex, young_uncontrolled_diabetes,
+        high_risk_discharge_with_history, severe_med_instability,
+        diag1_enc, diag2_enc, diag3_enc,
+        diag_1_diabetes, diag_1_circulatory, diag_1_respiratory,
+        diag_1_digestive, diag_1_genitourinary, diag_1_musculoskeletal,
+        diag_1_injury, diag_1_neoplasms, diag_1_other,
     ]], columns=FEATURE_COLS)
 
-    # Pipeline (LR) only needs its subset of features
-    features = all_features[LR_POLY_FEATURES] if isinstance(model, Pipeline) else all_features
-
+    pred  = int(model.predict(features)[0])
     proba = model.predict_proba(features)[0]
-
-    # Use the F1-optimal threshold found during training
-    perf = load_performance()
-    threshold = perf.get('optimal_threshold', 0.5)
-    pred = int(proba[1] >= threshold)
 
     return {
         'prediction':    pred,
         'label':         'Early Readmission Risk' if pred == 1 else 'Low Readmission Risk',
         'probabilities': {
-            'Low Risk (Not Early)':    round(float(proba[0]) * 100, 1),
-            'High Risk (Early <30d)':  round(float(proba[1]) * 100, 1),
+            'Low Risk (Not Early)': round(float(proba[0]) * 100, 1),
+            'High Risk (Early <30d)': round(float(proba[1]) * 100, 1),
         },
     }
 
 
 if __name__ == '__main__':
-    results = train_all_models()
-    print(f"\nBest model : {results['model']}")
-    print(f"Accuracy   : {results['test_performance']['accuracy']:.1%}")
-    print(f"ROC-AUC    : {results['test_performance']['roc_auc']:.3f}")
-    print(f"F1 Macro   : {results['test_performance']['f1_macro']:.3f}")
-    print(f"F1 Minority: {results['test_performance']['f1_minority']:.3f}")
-    print(f"CV ROC-AUC : {results['cross_validation']['cv_roc_auc_mean']:.3f} "
+    results = train()
+    print(f"Test Accuracy : {results['test_performance']['accuracy']:.1%}")
+    print(f"ROC-AUC       : {results['test_performance']['roc_auc']:.3f}")
+    print(f"CV ROC-AUC    : {results['cross_validation']['cv_roc_auc_mean']:.3f} "
           f"± {results['cross_validation']['cv_roc_auc_std']:.3f}")
+    print(f"Avg Precision : {results['test_performance']['avg_precision']:.3f}")
+    print(f"Overfit Gap   : {results['overfitting_gap']:.1f}%")
