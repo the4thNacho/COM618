@@ -77,16 +77,16 @@ MODELS = {
         random_state=42,
     ),
     'XGBoost': XGBClassifier(
-        n_estimators=250,
-        learning_rate=0.05,
-        max_depth=4,
-        min_child_weight=30,
-        subsample=0.8,
-        colsample_bytree=0.7,
-        reg_alpha=0.1,
-        reg_lambda=1.0,
-        scale_pos_weight=10,
-        tree_method='hist',    # histogram-based splits — much faster on large datasets
+        n_estimators=300,         # Moderate number of trees
+        learning_rate=0.05,       # Balanced learning rate
+        max_depth=4,              # Allow 4-way interactions
+        min_child_weight=40,      # Moderate regularization (increased from 30)
+        subsample=0.8,            # Standard stochastic training
+        colsample_bytree=0.7,     # Feature subsampling
+        reg_alpha=0.2,            # Light L1 regularization
+        reg_lambda=1.5,           # Moderate L2 regularization
+        scale_pos_weight=9,       # Match the ~9:1 class imbalance (was 10)
+        tree_method='hist',       # histogram-based splits — much faster on large datasets
         eval_metric='logloss',
         random_state=42,
         n_jobs=-1,
@@ -110,8 +110,11 @@ def train_all_models(progress_cb=None) -> dict:
     stratified split. Select the best by ROC-AUC and save it as the
     active prediction model.
 
-    progress_cb: optional callable(message: str) for live progress reporting.
-    Returns the best model's performance dict (also written to performance.json).
+    Args:
+        progress_cb: optional callable(message: str) for live progress reporting.
+    
+    Returns:
+        The best model's performance dict (also written to performance.json).
     """
     def _progress(msg: str):
         print(msg, flush=True)
@@ -125,6 +128,9 @@ def train_all_models(progress_cb=None) -> dict:
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.20, random_state=42, stratify=y
     )
+    
+    # Use balanced class weights + new interaction features (no resampling)
+    _progress(f'Training set: {len(y_train):,} samples ({(y_train==0).sum():,} majority, {(y_train==1).sum():,} minority)')
 
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
@@ -225,8 +231,30 @@ def train_all_models(progress_cb=None) -> dict:
                 'f1':        round(opt_report['Early (<30d)']['f1-score'], 3),
             },
         }
+        
+        _progress(f'{name}: ROC-AUC={roc_auc:.5f}, F1={f1_minor_opt:.4f}, Gap={gap:.2f}%')
 
-        if roc_auc > best_auc:
+        # Selection logic: prefer model with best overall performance
+        # 1. If ROC-AUC differs by >0.5%, pick higher ROC-AUC
+        # 2. If tied within 0.5%, pick lower overfitting gap (better generalization)
+        is_better = False
+        if roc_auc - best_auc > 0.005:  # Clearly better ROC-AUC
+            is_better = True
+            _progress(f'  → {name} has better ROC-AUC: {roc_auc:.5f} vs {best_auc:.5f}')
+        elif abs(roc_auc - best_auc) <= 0.005:  # Tied within 0.5%
+            # Use secondary criteria
+            current_gap = abs(gap)
+            best_gap = abs(comparison[best_name]['overfit_gap'])
+            _progress(f'  → ROC-AUC tie: {name} ({roc_auc:.5f}) vs {best_name} ({best_auc:.5f})')
+            _progress(f'  → Comparing gaps: {current_gap:.2f}% vs {best_gap:.2f}%')
+            if current_gap < best_gap - 0.3:  # Meaningfully lower overfitting
+                is_better = True
+                _progress(f'  → Selecting {name} (lower overfitting gap)')
+            elif abs(current_gap - best_gap) < 0.3 and f1_minor_opt > comparison[best_name]['f1_minority']:
+                is_better = True
+                _progress(f'  → Selecting {name} (similar gap but higher F1)')
+        
+        if is_better:
             best_auc       = roc_auc
             best_name      = name
             best_model     = model
@@ -319,6 +347,15 @@ def train_all_models(progress_cb=None) -> dict:
 
 
 def train(progress_cb=None) -> dict:
+    """
+    Train all models and select the best by ROC-AUC.
+    
+    Args:
+        progress_cb: Optional callback for progress messages
+    
+    Returns:
+        Performance metrics dictionary
+    """
     return train_all_models(progress_cb=progress_cb)
 
 

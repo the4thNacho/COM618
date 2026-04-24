@@ -301,6 +301,66 @@ def clean(raw: pd.DataFrame) -> pd.DataFrame:
     df['high_prior_inpatient'] = (df['number_inpatient'] >= 3).astype(int)
     df['repeat_ed_user']       = (df['number_emergency'] >= 2).astype(int)
 
+    # ── Step 14i: High-risk interaction features ─────────────────────────────
+    # These capture clinically meaningful compound risk factors that drive
+    # early readmission based on domain knowledge and EDA findings.
+    
+    # Elderly frequent flyer: age 70+ with ≥2 prior inpatient stays
+    # High-risk profile: older patients with complex recurring conditions
+    df['elderly_frequent_inpatient'] = (
+        (df['age_numeric'] >= 70) & (df['number_inpatient'] >= 2)
+    ).astype(int)
+    
+    # Complex diabetes case: poor glycaemic control + long stay
+    # Indicates difficulty stabilising the patient
+    df['complex_diabetes_stay'] = (
+        (df['poor_glycaemic_control'] == 1) & (df['long_stay'] == 1)
+    ).astype(int)
+    
+    # Unstable medication regimen: multiple med changes + emergency admission
+    # Suggests acute decompensation requiring urgent intervention
+    df['unstable_med_regimen'] = (
+        (df['num_meds_changed'] >= 3) & (df['admission_source_grp'] == 1)
+    ).astype(int)
+    
+    # Dual chronic condition: both diabetes and circulatory disease present
+    # Compounding risk from two major chronic conditions
+    df['diabetes_circulatory_comorbid'] = (
+        (df['diag_diabetes_any'] == 1) & (df['diag_circulatory_any'] == 1)
+    ).astype(int)
+    
+    # Premature discharge risk: short stay (≤2 days) + insulin dose reduced
+    # May indicate discharged before fully stable
+    df['premature_discharge_risk'] = (
+        (df['time_in_hospital'] <= 2) & (df['insulin_down'] == 1)
+    ).astype(int)
+    
+    # ER frequent flyer: emergency admission + ≥2 prior inpatient stays
+    # Pattern of repeated acute episodes
+    df['er_frequent_readmitter'] = (
+        (df['admission_source_grp'] == 1) & (df['number_inpatient'] >= 2)
+    ).astype(int)
+    
+    # High-intensity complex case: many labs per day + multimorbid + long stay
+    # Severely ill patient requiring extensive monitoring
+    df['high_intensity_complex'] = (
+        (df['labs_per_day'] >= 5) & (df['multimorbid'] == 1) & (df['long_stay'] == 1)
+    ).astype(int)
+    
+    # Young diabetes + poor control: age <40 with A1C >8%
+    # Type 1 or poorly managed Type 2 in younger patient
+    df['young_uncontrolled_diabetes'] = (
+        (df['age_numeric'] < 40) & (df['a1c_result_enc'] >= 3)
+    ).astype(int)
+    
+    # High-risk discharge + prior inpatient: combination of two strong signals
+    df['high_risk_discharge_with_history'] = (
+        (df['high_risk_discharge'] == 1) & (df['has_prior_inpatient'] == 1)
+    ).astype(int)
+    
+   # Multiple medication instability: ≥4 meds changed
+    df['severe_med_instability'] = (df['num_meds_changed'] >= 4).astype(int)
+
     # ── Step 14h: One-hot primary diagnosis ──────────────────────────────────
     # diag_1 is the principal diagnosis — the single strongest categorical
     # signal. One-hot avoids the false ordinality of label encoding.
@@ -589,6 +649,17 @@ FEATURE_COLS = [
     # Engineered: prior care risk flags
     'high_prior_inpatient',
     'repeat_ed_user',
+    # Engineered: high-risk interaction features
+    'elderly_frequent_inpatient',
+    'complex_diabetes_stay',
+    'unstable_med_regimen',
+    'diabetes_circulatory_comorbid',
+    'premature_discharge_risk',
+    'er_frequent_readmitter',
+    'high_intensity_complex',
+    'young_uncontrolled_diabetes',
+    'high_risk_discharge_with_history',
+    'severe_med_instability',
     # Diagnosis ordinal (diag_2 / diag_3 keep ordinal; diag_1 one-hot below)
     'diag_1_cat_enc',
     'diag_2_cat_enc',

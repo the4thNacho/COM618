@@ -11,8 +11,14 @@ Routes:
     /model      — Predictive model + live prediction form
     /performance — Model performance dashboard
     /image/<n>  — Serve chart images from various output directories
+
+Usage:
+    python app.py          — Run Flask server (train models if needed)
+    python app.py -r       — Force model retraining then run server
+    python app.py --retrain — Force model retraining then run server
 """
 
+import argparse
 import os
 import threading
 
@@ -350,6 +356,44 @@ def api_cluster():
 
 
 if __name__ == '__main__':
-    if not os.path.exists(MODEL_PATH):
-        train()
+    parser = argparse.ArgumentParser(
+        description='Flask app for Medical Data Analysis with optional model retraining'
+    )
+    parser.add_argument(
+        '-r', '--retrain',
+        action='store_true',
+        help='Force model retraining before starting the server'
+    )
+    parser.add_argument(
+        '-c', '--clean',
+        action='store_true',
+        help='Force data cleaning regeneration before training (use with -r)'
+    )
+    args = parser.parse_args()
+    
+    # Only run training/cleaning in the main process, not in the Flask reloader
+    # WERKZEUG_RUN_MAIN is set by Flask's reloader in the child process
+    is_reloader_process = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
+    
+    if not is_reloader_process:
+        if args.clean or args.retrain:
+            if args.clean:
+                print("=" * 70)
+                print("REGENERATING CLEANED DATA (forced by -c flag)")
+                print("=" * 70)
+                run_cleaning_pipeline(force=True)
+                print("Cleaned data regenerated successfully\n")
+        
+        if args.retrain:
+            print("=" * 70)
+            print("RETRAINING MODELS (forced by -r flag)")
+            print("=" * 70)
+            train()
+            print("\n" + "=" * 70)
+            print("RETRAINING COMPLETE - Starting Flask server")
+            print("=" * 70 + "\n")
+        elif not os.path.exists(MODEL_PATH):
+            print("Models not found - training automatically...")
+            train()
+    
     app.run(debug=True, port=5000)
