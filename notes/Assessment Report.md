@@ -1,0 +1,16 @@
+- Create repo that contains messy and clean dataset
+- Select dataset to use - this must be justified in report
+- Sections should lead into each otther - "the next step is pre-proecessing"
+	- Then the next section heading would be pre-processing
+- Need to link dataset in report:
+	- Talk about source, how is it reliable
+	- Don't need to submit report
+- Citations
+- Code Snippets
+- References/sources
+- Use third person - this report, this function etc..
+-
+## Models:
+- When using a model, find literature that justifies its usage
+	- E.g., Random Forest - this source shows that RF excels at analysis with data such as....
+- Compare model performance with results in published literature, and publish
