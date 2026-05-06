@@ -104,7 +104,7 @@ def train() -> dict:
     cm = confusion_matrix(y_test, y_pred)
 
     # ── Feature importance ────────────────────────────────────────────────────
-    # XGBoost returns float32 — convert to plain Python float for JSON serialisation
+    # feature_importances_ returns numpy floats — convert to plain Python float for JSON serialisation
     importance = {k: round(float(v), 4)
                   for k, v in zip(FEATURE_COLS, model.feature_importances_)}
 
@@ -235,7 +235,7 @@ def _save_feature_importance(model):
 
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.barh([labels[i] for i in sorted_idx], importances[sorted_idx], color='#2980b9')
-    ax.set_xlabel('Feature Importance (Gini)')
+    ax.set_xlabel('Feature Importance (Mean Impurity Decrease)')
     ax.set_title('Top 15 Feature Importances — Gradient Boosting')
     ax.grid(axis='x', alpha=0.3)
     plt.tight_layout()
