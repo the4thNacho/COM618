@@ -119,6 +119,8 @@ def train() -> dict:
             'accuracy':          round(test_acc, 4),
             'roc_auc':           round(roc_auc, 4),
             'avg_precision':     round(avg_prec, 4),
+            'f1_macro':          round(report['macro avg']['f1-score'], 4),
+            'f1_minority':       round(report['Early (<30d)']['f1-score'], 4),
             'report':            report,
         },
         'training_performance': {
@@ -200,10 +202,28 @@ def load_model():
     return model
 
 
+def _f1(precision, recall):
+    return round(2 * precision * recall / (precision + recall), 4) if (precision + recall) > 0 else 0.0
+
+
 def load_comparison() -> dict:
     if os.path.exists(COMPARISON_JSON):
         with open(COMPARISON_JSON) as f:
-            return json.load(f)
+            data = json.load(f)
+        # Back-fill f1_macro / f1_minority if missing (computed from confusion matrix)
+        for m in data.get('models', {}).values():
+            if 'f1_macro' not in m and 'confusion_matrix' in m:
+                tn, fp, fn, tp = (m['confusion_matrix'][0][0], m['confusion_matrix'][0][1],
+                                  m['confusion_matrix'][1][0], m['confusion_matrix'][1][1])
+                p_maj = tn / (tn + fn) if (tn + fn) > 0 else 0
+                r_maj = tn / (tn + fp) if (tn + fp) > 0 else 0
+                p_min = tp / (tp + fp) if (tp + fp) > 0 else 0
+                r_min = tp / (tp + fn) if (tp + fn) > 0 else 0
+                f1_maj = _f1(p_maj, r_maj)
+                f1_min = _f1(p_min, r_min)
+                m['f1_macro']   = round((f1_maj + f1_min) / 2, 4)
+                m['f1_minority'] = m.get('f1_minority', f1_min)
+        return data
     return {'best_model': 'GradientBoostingClassifier', 'models': {}}
 
 
