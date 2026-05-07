@@ -396,4 +396,4 @@ if __name__ == '__main__':
             print("Models not found - training automatically...")
             train()
     
-    app.run(debug=True, port=5000)
+    app.run(debug=True, use_reloader=False, port=5000)
